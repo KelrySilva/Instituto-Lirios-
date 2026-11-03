@@ -1,0 +1,21 @@
+{
+  "name": "instituto-lirios-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API REST do sistema de gestão do Instituto Lírios",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node testes-api.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "mysql2": "^3.11.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entrar · Instituto Lírios</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-form-side">
+    <form class="login-form" id="formLogin">
+      <h1 style="font-size:30px; margin-bottom:4px;">Bem-vinda!</h1>
+      <p class="muted" style="margin-bottom:28px;">Faça login para acessar o sistema</p>
+
+      <div class="field-group">
+        <label class="field-label">E-mail</label>
+        <input class="field-input" id="loginEmail" type="email" value="katlhen@lirios.com.br" required>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Senha</label>
+        <input class="field-input" id="loginSenha" type="password" value="senha1234" required>
+      </div>
+
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-muted); margin:6px 0 24px;">
+        <input type="checkbox" style="accent-color: var(--brown-500);"> Esqueci minha senha
+      </label>
+
+      <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:13px;">Entrar</button>
+    </form>
+  </div>
+
+  <div class="login-hero">
+    <div class="brand-mark" style="width:88px; height:88px; margin-bottom:18px;">
+      <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M24 6c-3 4-3 8 0 11 3-3 3-7 0-11Z" fill="#C7A489"/>
+        <path d="M24 17c-6 0-11 5-11 11 0 7 5 12 11 15 6-3 11-8 11-15 0-6-5-11-11-11Z" stroke="#8A6248" stroke-width="1.6" fill="none"/>
+        <circle cx="24" cy="26" r="4.5" stroke="#8A6248" stroke-width="1.5" fill="none"/>
+      </svg>
+    </div>
+    <p class="small" style="letter-spacing:.05em; color:var(--brown-700);">Instituto</p>
+    <h1 style="font-size:44px; margin:2px 0 0;">LÍRIOS</h1>
+    <p class="serif" style="font-style:italic; font-size:19px; color:var(--brown-500); margin-top:4px;">Dra. Katlhen Carvalho</p>
+    <div style="width:34px; height:1px; background:var(--brown-400); margin:20px auto;"></div>
+    <p class="small muted" style="letter-spacing:.04em;">CUIDANDO DE QUEM GESTA,<br>DO BEBÊ E DA FAMÍLIA.</p>
+  </div>
+</div>
+<script src="assets/banco.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
