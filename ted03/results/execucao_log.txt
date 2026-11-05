@@ -1,0 +1,69 @@
+==========================================================================
+1) CARGA E TRATAMENTO
+==========================================================================
+Base bruta: 1014 registros, 7 colunas
+Valores ausentes: 0
+Duplicatas exatas: 562
+Limpeza: 1014 -> 452 (duplicatas) -> 451 (HeartRate=7) -> 448 (Age<12)
+Base tratada salva em: /home/user/workspaces/e78a219b-cb48-4e32-b4da-384a45c45d2d/projeto/data/processed/maternal_health_risk_clean.csv
+
+==========================================================================
+2) COMPARACAO DE MODELOS (validacao cruzada repetida 5x3)
+==========================================================================
+
+Cenario A - base tratada (448 registros unicos):
+  [tratada] Baseline (classe majoritaria)    acc=0.516  f1_macro=0.227 (+-0.001)
+  [tratada] Regressao Logistica              acc=0.583  f1_macro=0.552 (+-0.047)
+  [tratada] Arvore de Decisao                acc=0.702  f1_macro=0.613 (+-0.052)
+  [tratada] Random Forest                    acc=0.668  f1_macro=0.608 (+-0.049)
+  [tratada] Gradient Boosting                acc=0.685  f1_macro=0.618 (+-0.058)
+  [tratada] SVM (RBF)                        acc=0.679  f1_macro=0.617 (+-0.041)
+
+Cenario B - base bruta (1.014 registros, com duplicatas):
+  [bruta] Baseline (classe majoritaria)    acc=0.400  f1_macro=0.191 (+-0.001)
+  [bruta] Regressao Logistica              acc=0.604  f1_macro=0.605 (+-0.032)
+  [bruta] Arvore de Decisao                acc=0.674  f1_macro=0.663 (+-0.018)
+  [bruta] Random Forest                    acc=0.815  f1_macro=0.819 (+-0.015)
+  [bruta] Gradient Boosting                acc=0.794  f1_macro=0.798 (+-0.023)
+  [bruta] SVM (RBF)                        acc=0.695  f1_macro=0.687 (+-0.026)
+
+==========================================================================
+3) BUSCA DE HIPERPARAMETROS - Random Forest
+==========================================================================
+Melhores hiperparametros: {'max_depth': 12, 'max_features': 'sqrt', 'min_samples_leaf': 4, 'n_estimators': 200}
+Melhor F1-macro em CV: 0.637
+
+==========================================================================
+4) AVALIACAO FINAL - HOLDOUT 70/30 ESTRATIFICADO
+==========================================================================
+Treino: 313 | Teste: 135
+Distribuicao no teste: {'low risk': 69, 'high risk': 34, 'mid risk': 32}
+  Baseline (classe majoritaria)    acc=0.511  f1_macro=0.225
+  Regressao Logistica              acc=0.652  f1_macro=0.608
+  Arvore de Decisao                acc=0.681  f1_macro=0.564
+  Random Forest                    acc=0.667  f1_macro=0.569
+  Gradient Boosting                acc=0.681  f1_macro=0.587
+  SVM (RBF)                        acc=0.719  f1_macro=0.637
+  Random Forest (ajustado)         acc=0.704  f1_macro=0.614
+Erros ordinais: {'erros_total': 40, 'erros_adjacentes': 35, 'erros_distantes': 5, 'pct_erros_adjacentes': 0.875, 'distancia_media_absoluta': 0.3333333333333333}
+
+Modelo final - treino x teste: {'f1_macro_treino': 0.7800545808966861, 'f1_macro_teste': 0.6143742165943831, 'acuracia_treino': 0.8146964856230032, 'acuracia_teste': 0.7037037037037037}
+
+==========================================================================
+5) EXPERIMENTO AUXILIAR - high risk vs. nao high risk
+==========================================================================
+  Regressao Logistica    AUC=0.922  recall(high)=0.735
+  Random Forest          AUC=0.950  recall(high)=0.853
+  Gradient Boosting      AUC=0.945  recall(high)=0.765
+
+Arquivos gerados em: /home/user/workspaces/e78a219b-cb48-4e32-b4da-384a45c45d2d/projeto/figures e /home/user/workspaces/e78a219b-cb48-4e32-b4da-384a45c45d2d/projeto/results
+
+Resumo do holdout:
+                        modelo  acuracia  acuracia_balanceada  f1_macro  f1_weighted
+                    SVM (RBF)     0.719                0.633     0.637        0.690
+     Random Forest (ajustado)     0.704                0.627     0.614        0.669
+          Regressao Logistica     0.652                0.596     0.608        0.651
+            Gradient Boosting     0.681                0.597     0.587        0.641
+                Random Forest     0.667                0.586     0.569        0.625
+            Arvore de Decisao     0.681                0.581     0.564        0.634
+Baseline (classe majoritaria)     0.511                0.333     0.225        0.346

@@ -1,0 +1,198 @@
+{
+  "n_bruto": 1014,
+  "n_tratado": 448,
+  "melhores_hiperparametros": {
+    "max_depth": 12,
+    "max_features": "sqrt",
+    "min_samples_leaf": 4,
+    "n_estimators": 200
+  },
+  "cv_best_score": 0.6371076845192359,
+  "holdout": [
+    {
+      "modelo": "SVM (RBF)",
+      "acuracia": 0.7185185185185186,
+      "acuracia_balanceada": 0.6326371128161409,
+      "f1_macro": 0.6370733947587474,
+      "f1_weighted": 0.6898214325580209
+    },
+    {
+      "modelo": "Random Forest (ajustado)",
+      "acuracia": 0.7037037037037037,
+      "acuracia_balanceada": 0.6267227905655015,
+      "f1_macro": 0.6143742165943831,
+      "f1_weighted": 0.6691655553820216
+    },
+    {
+      "modelo": "Regressao Logistica",
+      "acuracia": 0.6518518518518519,
+      "acuracia_balanceada": 0.5959700909349247,
+      "f1_macro": 0.6078940550216695,
+      "f1_weighted": 0.6508845759269728
+    },
+    {
+      "modelo": "Gradient Boosting",
+      "acuracia": 0.6814814814814815,
+      "acuracia_balanceada": 0.59669828076158,
+      "f1_macro": 0.5866161616161617,
+      "f1_weighted": 0.6407800224466891
+    },
+    {
+      "modelo": "Random Forest",
+      "acuracia": 0.6666666666666666,
+      "acuracia_balanceada": 0.5864236999147484,
+      "f1_macro": 0.5689382901072673,
+      "f1_weighted": 0.6253906843857303
+    },
+    {
+      "modelo": "Arvore de Decisao",
+      "acuracia": 0.6814814814814815,
+      "acuracia_balanceada": 0.5811665245808468,
+      "f1_macro": 0.5637626262626263,
+      "f1_weighted": 0.6339085297418631
+    },
+    {
+      "modelo": "Baseline (classe majoritaria)",
+      "acuracia": 0.5111111111111111,
+      "acuracia_balanceada": 0.3333333333333333,
+      "f1_macro": 0.22549019607843138,
+      "f1_weighted": 0.34575163398692815
+    }
+  ],
+  "modelo_final": "Random Forest (ajustado)",
+  "treino_teste_f1_macro": {
+    "f1_macro_treino": 0.7800545808966861,
+    "f1_macro_teste": 0.6143742165943831,
+    "acuracia_treino": 0.8146964856230032,
+    "acuracia_teste": 0.7037037037037037
+  },
+  "relatorio_final": {
+    "low risk": {
+      "precision": 0.7294117647058823,
+      "recall": 0.8985507246376812,
+      "f1-score": 0.8051948051948052,
+      "support": 69.0
+    },
+    "mid risk": {
+      "precision": 0.4,
+      "recall": 0.1875,
+      "f1-score": 0.2553191489361702,
+      "support": 32.0
+    },
+    "high risk": {
+      "precision": 0.7714285714285715,
+      "recall": 0.7941176470588235,
+      "f1-score": 0.782608695652174,
+      "support": 34.0
+    },
+    "accuracy": 0.7037037037037037,
+    "macro avg": {
+      "precision": 0.6336134453781512,
+      "recall": 0.6267227905655015,
+      "f1-score": 0.6143742165943831,
+      "support": 135.0
+    },
+    "weighted avg": {
+      "precision": 0.661910986616869,
+      "recall": 0.7037037037037037,
+      "f1-score": 0.6691655553820216,
+      "support": 135.0
+    }
+  },
+  "erros_ordinais": {
+    "erros_total": 40,
+    "erros_adjacentes": 35,
+    "erros_distantes": 5,
+    "pct_erros_adjacentes": 0.875,
+    "distancia_media_absoluta": 0.3333333333333333
+  },
+  "binario": [
+    {
+      "modelo": "Random Forest",
+      "auc": 0.9496214327315085,
+      "precisao_high": 0.7631578947368421,
+      "revocacao_high": 0.8529411764705882,
+      "f1_high": 0.8055555555555556,
+      "acuracia": 0.8962962962962963
+    },
+    {
+      "modelo": "Gradient Boosting",
+      "auc": 0.9452533488642982,
+      "precisao_high": 0.7878787878787878,
+      "revocacao_high": 0.7647058823529411,
+      "f1_high": 0.7761194029850746,
+      "acuracia": 0.8888888888888888
+    },
+    {
+      "modelo": "Regressao Logistica",
+      "auc": 0.9222481071636576,
+      "precisao_high": 0.6578947368421053,
+      "revocacao_high": 0.7352941176470589,
+      "f1_high": 0.6944444444444444,
+      "acuracia": 0.837037037037037
+    }
+  ],
+  "learning_curve": {
+    "sizes": [
+      71,
+      128,
+      186,
+      243,
+      300,
+      358
+    ],
+    "treino": [
+      0.8778,
+      0.9054,
+      0.8575,
+      0.8304,
+      0.826,
+      0.7993
+    ],
+    "validacao": [
+      0.5451,
+      0.5929,
+      0.62,
+      0.6189,
+      0.6368,
+      0.6318
+    ]
+  },
+  "importancia": [
+    {
+      "variavel": "Age",
+      "gini": 0.143,
+      "permutacao": -0.0276
+    },
+    {
+      "variavel": "SystolicBP",
+      "gini": 0.2253,
+      "permutacao": 0.0638
+    },
+    {
+      "variavel": "DiastolicBP",
+      "gini": 0.1156,
+      "permutacao": 0.0011
+    },
+    {
+      "variavel": "BS",
+      "gini": 0.3244,
+      "permutacao": 0.1159
+    },
+    {
+      "variavel": "BodyTemp",
+      "gini": 0.0911,
+      "permutacao": 0.0458
+    },
+    {
+      "variavel": "HeartRate",
+      "gini": 0.1006,
+      "permutacao": -0.0197
+    }
+  ],
+  "distribuicao_classes_tratada": {
+    "low risk": 231,
+    "high risk": 112,
+    "mid risk": 105
+  }
+}
