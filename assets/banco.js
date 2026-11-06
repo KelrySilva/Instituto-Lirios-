@@ -218,6 +218,8 @@
   function agendaSeed() {
     var base = [
       { dias: 0, hora: '09:30', cliente: 'Maria Silva', servico: 'Pré-natal', duracao: 60 },
+      { dias: 1, hora: '08:30', cliente: 'Fernanda Rocha', servico: 'Perfuração Humanizada', duracao: 40 },
+      { dias: 1, hora: '10:00', cliente: 'Ana Sousa', servico: 'Puericultura', duracao: 45 },
       { dias: 4, hora: '10:30', cliente: 'Ana Sousa', servico: 'Puericultura', duracao: 45 },
       { dias: 9, hora: '14:00', cliente: 'Carla Lima', servico: 'Consultoria de Amamentação', duracao: 60 },
       { dias: 16, hora: '16:00', cliente: 'Júlia Alves', servico: 'Auriculoterapia', duracao: 50 }
@@ -379,6 +381,7 @@
     pendencias: [],
     servicos: [],
     dashboard: null,
+    lembretes: [],
 
     /* ------------------------------- carga -------------------------------- */
 
@@ -955,6 +958,77 @@
         Banco.salvarLocal(CHAVE.servicos, Banco.servicos);
       }
       return servico;
+    },
+
+    /* --------------------------- resumo inteligente ------------------------ */
+
+    /**
+     * Pede à API o resumo da cliente (modelo de linguagem, ou resumo básico se
+     * não houver chave). Devolve { linhas, origem, aviso } ou null no modo local.
+     */
+    gerarResumoIA: async function (cliente) {
+      if (Banco.modo !== 'api' || !cliente || !cliente.id) return null;
+      return Banco.pedir('/resumo-ia/' + cliente.id, { method: 'POST', timeout: 40000 });
+    },
+
+    /* ------------------------------ lembretes ----------------------------- */
+
+    /** Lembretes das consultas de um dia (padrão: amanhã). */
+    carregarLembretes: async function (dia) {
+      var alvo = dia || somarDias(hojeISO(), 1);
+
+      if (Banco.modo === 'api') {
+        var resposta = await Banco.pedir('/lembretes?data=' + alvo);
+        Banco.lembretes = resposta.lembretes;
+        return Banco.lembretes;
+      }
+
+      // modo local: monta a partir da agenda e guarda o status no navegador
+      var guardados = lerLocal('lirios.lembretes') || {};
+      Banco.lembretes = Banco.agenda
+        .filter(function (a) { return String(a.inicio).slice(0, 10) === alvo && a.status === 'agendado'; })
+        .map(function (a) {
+          var cliente = Banco.clientes.filter(function (c) { return c.nome === a.cliente; })[0];
+          var telefone = cliente ? cliente.telefone : '';
+          var mensagem = Banco.montarMensagemLembrete(a);
+          var estado = guardados[a.id] || {};
+          return {
+            id: a.id, agendamento_id: a.id, cliente: a.cliente, servico: a.servico,
+            inicio: a.inicio, telefone: telefone, mensagem: mensagem,
+            status: estado.status || 'pendente',
+            link_whatsapp: Banco.linkWhatsApp(telefone, mensagem)
+          };
+        })
+        .sort(function (x, y) { return String(x.inicio).localeCompare(String(y.inicio)); });
+      return Banco.lembretes;
+    },
+
+    marcarLembrete: async function (lembrete, status) {
+      if (Banco.modo === 'api') {
+        var atualizado = await Banco.pedir('/lembretes/' + lembrete.id + '/status', {
+          method: 'PATCH', corpo: { status: status }
+        });
+        lembrete.status = atualizado.status;
+      } else {
+        var guardados = lerLocal('lirios.lembretes') || {};
+        guardados[lembrete.id] = { status: status };
+        gravarLocal('lirios.lembretes', guardados);
+        lembrete.status = status;
+      }
+      return lembrete;
+    },
+
+    montarMensagemLembrete: function (ag) {
+      var dia = String(ag.inicio).slice(0, 10).split('-');
+      return 'Olá, ' + String(ag.cliente).trim().split(' ')[0] + '! Passando para lembrar da sua consulta de ' +
+        ag.servico + ' no Instituto Lírios, no dia ' + dia[2] + '/' + dia[1] + '/' + dia[0] + ', às ' +
+        String(ag.inicio).slice(11, 16) + '. Pode confirmar sua presença? Dra. Katlhen Carvalho.';
+    },
+
+    linkWhatsApp: function (telefone, mensagem) {
+      var d = String(telefone || '').replace(/\D/g, '');
+      if (d.length === 10 || d.length === 11) d = '55' + d;
+      return /^55\d{10,11}$/.test(d) ? 'https://wa.me/' + d + '?text=' + encodeURIComponent(mensagem) : null;
     },
 
     /* ------------------------------ dashboard ----------------------------- */

@@ -703,9 +703,32 @@
     }
   }
 
-  function attachAISummary(buttonEl, outputEl, summaryLines) {
+  function attachAISummary(buttonEl, outputEl, summaryLines, gerador) {
     if (!buttonEl || !outputEl) return;
     var textoOriginal = buttonEl.textContent;
+
+    function mostrar(linhas, aviso) {
+      var fragmento = document.createDocumentFragment();
+      linhas.forEach(function (linha) {
+        var item = document.createElement('li');
+        item.textContent = linha;
+        fragmento.appendChild(item);
+      });
+      if (aviso) {
+        var nota = document.createElement('li');
+        nota.className = 'muted small';
+        nota.textContent = aviso;
+        fragmento.appendChild(nota);
+      }
+      outputEl.textContent = '';
+      outputEl.appendChild(fragmento);
+    }
+
+    function terminar() {
+      outputEl.removeAttribute('aria-busy');
+      buttonEl.textContent = textoOriginal;
+      buttonEl.disabled = false;
+    }
 
     buttonEl.addEventListener('click', function () {
       buttonEl.disabled = true;
@@ -713,20 +736,30 @@
       outputEl.textContent = '';
       outputEl.setAttribute('aria-busy', 'true');
 
-      window.setTimeout(function () {
-        var fragmento = document.createDocumentFragment();
-        summaryLines.forEach(function (linha) {
-          var item = document.createElement('li');
-          item.textContent = linha;
-          fragmento.appendChild(item);
-        });
-        outputEl.textContent = '';
-        outputEl.appendChild(fragmento);
-        outputEl.removeAttribute('aria-busy');
-        buttonEl.textContent = textoOriginal;
-        buttonEl.disabled = false;
-      }, 900);
+      // Com API e uma cliente identificada: resumo real. Senão, a simulação de antes.
+      var pedido = gerador ? Promise.resolve(gerador()) : Promise.resolve(null);
+
+      pedido.then(function (resultado) {
+        if (resultado && resultado.linhas && resultado.linhas.length) {
+          mostrar(resultado.linhas, resultado.aviso);
+          terminar();
+        } else {
+          window.setTimeout(function () { mostrar(summaryLines); terminar(); }, 900);
+        }
+      }).catch(function (erro) {
+        console.warn('[Lírios] resumo por IA indisponível', erro);
+        mostrar(summaryLines, 'Não foi possível gerar o resumo agora. Exibindo exemplo.');
+        terminar();
+      });
     });
+  }
+
+  /** Cliente indicada em ?cliente= (usada pelos resumos da Ficha e do Atendimento). */
+  function clienteDaPagina() {
+    var pedido = new URLSearchParams(window.location.search).get('cliente');
+    var lista = carregarClientes();
+    var achada = pedido ? acharClientePorNome(lista, pedido) : null;
+    return achada || lista[0] || null;
   }
 
   /** Liga os botões de resumo. Pode ser chamada de novo após re-renderizar um painel. */
@@ -734,7 +767,11 @@
     Array.prototype.slice.call(document.querySelectorAll('[data-ai-summary]')).forEach(function (botao) {
       if (botao.dataset.ligado) return;
       botao.dataset.ligado = '1';
-      attachAISummary(botao, document.getElementById(botao.getAttribute('data-ai-summary')), lerLinhas(botao));
+      var saida = botao.getAttribute('data-ai-summary');
+      // Ficha e Atendimento resumem UMA cliente; Dashboard e Relatórios continuam como exemplo.
+      var porCliente = saida === 'fichaAiOutput' || saida === 'atendAiOutput';
+      var gerador = porCliente ? function () { return Banco.gerarResumoIA(clienteDaPagina()); } : null;
+      attachAISummary(botao, document.getElementById(saida), lerLinhas(botao), gerador);
     });
   }
 
@@ -2049,6 +2086,68 @@
     });
   }
 
+  /* --------------------------- 17. Lembretes ------------------------------- */
+
+  /** Card "Lembretes de amanhã" do Dashboard: lista, abre o WhatsApp e registra o envio. */
+  function iniciarLembretes() {
+    var lista = document.getElementById('listaLembretes');
+    if (!lista) return;
+
+    var rotulo = { pendente: 'Pendente', enviado: 'Enviado', confirmado: 'Confirmado' };
+
+    function desenhar(itens) {
+      var contador = document.getElementById('contadorLembretes');
+      var faltam = itens.filter(function (l) { return l.status === 'pendente'; }).length;
+      if (contador) contador.textContent = itens.length ? faltam + ' de ' + itens.length + ' a enviar' : '';
+
+      if (!itens.length) {
+        lista.innerHTML = '<li class="muted small">Nenhuma consulta agendada para amanhã.</li>';
+        return;
+      }
+
+      lista.innerHTML = itens.map(function (l, i) {
+        var acoes = l.link_whatsapp
+          ? '<a class="btn btn-primary btn-sm" data-lembrete-enviar="' + i + '" href="' + esc(l.link_whatsapp) +
+            '" target="_blank" rel="noopener">Enviar no WhatsApp</a>'
+          : '<span class="muted small">Sem telefone válido</span>';
+        var confirmar = l.status === 'enviado'
+          ? ' <button type="button" class="btn btn-ghost btn-sm" data-lembrete-confirmar="' + i + '">Confirmou</button>'
+          : '';
+        return '<li class="lembrete-item" style="display:block; padding:10px 0; border-bottom:1px solid var(--cream-100);">' +
+          '<div style="display:flex; justify-content:space-between; gap:8px;">' +
+            '<span><b>' + esc(String(l.inicio).slice(11, 16)) + '</b> · ' + esc(l.cliente) +
+            ' <span class="muted small">' + esc(l.servico) + '</span></span>' +
+            '<span class="badge ' + (l.status === 'pendente' ? 'badge-warn' : 'badge-ok') + '">' + rotulo[l.status] + '</span>' +
+          '</div>' +
+          '<div style="margin-top:8px;">' + acoes + confirmar + '</div></li>';
+      }).join('');
+    }
+
+    var itens = [];
+
+    Promise.resolve(Banco.carregarLembretes()).then(function (dados) {
+      itens = dados || [];
+      desenhar(itens);
+    }).catch(function (erro) {
+      lista.innerHTML = '<li class="muted small">Não foi possível carregar os lembretes.</li>';
+      console.warn('[Lírios] lembretes', erro);
+    });
+
+    // O clique no link abre o WhatsApp (comportamento do <a>); aqui só registramos o envio.
+    lista.addEventListener('click', function (evento) {
+      var enviar = evento.target.closest('[data-lembrete-enviar]');
+      var confirmar = evento.target.closest('[data-lembrete-confirmar]');
+      var alvo = enviar || confirmar;
+      if (!alvo) return;
+      var l = itens[Number(alvo.getAttribute(enviar ? 'data-lembrete-enviar' : 'data-lembrete-confirmar'))];
+      if (!l) return;
+      var novo = enviar ? (l.status === 'pendente' ? 'enviado' : l.status) : 'confirmado';
+      Promise.resolve(Banco.marcarLembrete(l, novo)).then(function () {
+        desenhar(itens);
+      }).catch(function () { toast('Não foi possível registrar o lembrete.'); });
+    });
+  }
+
   /* ------------------------------ Inicialização --------------------------- */
 
   document.addEventListener('DOMContentLoaded', async function () {
@@ -2074,6 +2173,7 @@
     iniciarRelatorios();
     iniciarAgenda();
     iniciarDashboard();
+    iniciarLembretes();
     iniciarLogin();
   });
 })();

@@ -12,5 +12,7 @@ router.use('/agenda', require('./agenda'));
 router.use('/pendencias', require('./pendencias'));
 router.use('/servicos', require('./servicos'));
 router.use('/dashboard', require('./dashboard'));
+router.use('/lembretes', require('./lembretes'));
+router.use('/resumo-ia', require('./resumo-ia'));
 
 module.exports = router;
