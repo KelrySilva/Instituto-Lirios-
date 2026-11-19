@@ -6,7 +6,7 @@ const { rota, id, texto, opcao, HttpError } = require('../http');
 
 const router = express.Router();
 
-const TIPOS = ['contrato', 'exame', 'confirmacao', 'anotacao', 'outro'];
+const TIPOS = ['contrato', 'exame', 'confirmacao', 'anotacao', 'pagamento', 'outro'];
 const STATUS = ['aberta', 'resolvida'];
 
 const CAMPOS = `

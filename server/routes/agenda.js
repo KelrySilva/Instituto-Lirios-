@@ -125,6 +125,25 @@ router.put('/:id', rota(async (req, res) => {
   const atual = await buscarAgendamento(idAgendamento);
   const corpo = req.body || {};
 
+  const novoInicio = 'inicio' in corpo ? dataHora(corpo.inicio, 'inicio') : atual.inicio;
+  const novaDuracao = 'duracao_min' in corpo
+    ? inteiro(corpo.duracao_min, 'duracao_min', { min: 1, max: 600, padrao: atual.duracao_min })
+    : atual.duracao_min;
+  const novoStatus = opcao(corpo.status, 'status', STATUS, atual.status);
+
+  // Reagendar: não pode cair em cima de outra consulta marcada.
+  if (('inicio' in corpo || 'duracao_min' in corpo) && novoStatus === 'agendado') {
+    const [choques] = await pool.execute(
+      `SELECT id FROM agendamentos
+        WHERE id <> ? AND status = 'agendado'
+          AND inicio < DATE_ADD(?, INTERVAL ? MINUTE)
+          AND DATE_ADD(inicio, INTERVAL duracao_min MINUTE) > ?
+        LIMIT 1`,
+      [idAgendamento, novoInicio, novaDuracao, novoInicio]
+    );
+    if (choques.length) throw new HttpError(409, 'Já existe uma consulta nesse horário.');
+  }
+
   await pool.execute(
     `UPDATE agendamentos
         SET cliente_id = ?, servico_id = ?, profissional_id = ?, inicio = ?,
@@ -136,17 +155,21 @@ router.put('/:id', rota(async (req, res) => {
       'profissional_id' in corpo
         ? (corpo.profissional_id ? id(corpo.profissional_id, 'profissional_id') : null)
         : atual.profissional_id,
-      'inicio' in corpo ? dataHora(corpo.inicio, 'inicio') : atual.inicio,
-      'duracao_min' in corpo
-        ? inteiro(corpo.duracao_min, 'duracao_min', { min: 1, max: 600, padrao: atual.duracao_min })
-        : atual.duracao_min,
-      opcao(corpo.status, 'status', STATUS, atual.status),
+      novoInicio,
+      novaDuracao,
+      novoStatus,
       'observacao' in corpo
         ? texto(corpo.observacao, 'observacao', { obrigatorio: false, max: 255 })
         : atual.observacao,
       idAgendamento
     ]
   );
+
+  // Mudou data, hora ou serviço: o texto do lembrete antigo não vale mais.
+  // Apagamos o lembrete; ele é gerado de novo (com os dados certos) quando o painel abre.
+  if ('inicio' in corpo || 'servico_id' in corpo || 'cliente_id' in corpo) {
+    await pool.execute('DELETE FROM lembretes WHERE agendamento_id = ?', [idAgendamento]);
+  }
 
   res.json(await buscarAgendamento(idAgendamento));
 }));

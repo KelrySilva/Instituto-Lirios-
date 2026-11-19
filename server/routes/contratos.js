@@ -3,6 +3,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { rota, id, decimal, opcao, HttpError } = require('../http');
+const { sincronizarPendenciaContrato } = require('../pendencias-auto');
 
 const router = express.Router();
 
@@ -92,13 +93,15 @@ router.post('/', rota(async (req, res) => {
     ]
   );
 
-  res.status(201).json(await buscarContrato(resultado.insertId));
+  const criado = await buscarContrato(resultado.insertId);
+  await sincronizarPendenciaContrato(criado.cliente_id);
+  res.status(201).json(criado);
 }));
 
 // PATCH /api/contratos/:id/assinar — idempotente
 router.patch('/:id/assinar', rota(async (req, res) => {
   const idContrato = id(req.params.id);
-  await buscarContrato(idContrato);
+  const atual = await buscarContrato(idContrato);
 
   await pool.execute(
     `UPDATE contratos
@@ -107,6 +110,7 @@ router.patch('/:id/assinar', rota(async (req, res) => {
     [idContrato]
   );
 
+  await sincronizarPendenciaContrato(atual.cliente_id);
   res.json(await buscarContrato(idContrato));
 }));
 
@@ -130,13 +134,17 @@ router.put('/:id', rota(async (req, res) => {
     ]
   );
 
+  await sincronizarPendenciaContrato(atual.cliente_id);
   res.json(await buscarContrato(idContrato));
 }));
 
 // DELETE /api/contratos/:id
 router.delete('/:id', rota(async (req, res) => {
-  const [resultado] = await pool.execute('DELETE FROM contratos WHERE id = ?', [id(req.params.id)]);
+  const idContrato = id(req.params.id);
+  const atual = await buscarContrato(idContrato);
+  const [resultado] = await pool.execute('DELETE FROM contratos WHERE id = ?', [idContrato]);
   if (!resultado.affectedRows) throw new HttpError(404, 'Contrato não encontrado.');
+  await sincronizarPendenciaContrato(atual.cliente_id);
   res.status(204).end();
 }));
 

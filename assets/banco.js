@@ -27,7 +27,8 @@
     agenda: 'lirios:agenda:v2',
     pendencias: 'lirios:pendencias:v2',
     servicos: 'lirios:servicos:v2',
-    sequencia: 'lirios:sequencia:v2'
+    sequencia: 'lirios:sequencia:v2',
+    documentos: 'lirios:documentos:v2'
   };
 
   var ROTULOS = {
@@ -344,6 +345,28 @@
     };
   }
 
+  /** Modo local: mesma regra da API (uma pendência de contrato aberta enquanto houver contrato pendente). */
+  function sincronizarPendenciaContratoLocal(nomeCliente, idCliente) {
+    function daCliente(item) { return normalizar(item.cliente) === normalizar(nomeCliente); }
+
+    var pendentes = Banco.contratos.filter(function (c) {
+      return daCliente(c) && !c.assinado && c.status === 'Pendente';
+    }).length;
+    var abertas = Banco.pendencias.filter(function (p) {
+      return daCliente(p) && p.tipo === 'contrato' && p.status === 'aberta';
+    });
+
+    if (pendentes > 0 && !abertas.length) {
+      Banco.pendencias.push({
+        id: proximoId(), cliente_id: idCliente, cliente: nomeCliente,
+        tipo: 'contrato', descricao: 'Contrato aguardando assinatura', status: 'aberta'
+      });
+    } else if (pendentes === 0) {
+      abertas.forEach(function (p) { p.status = 'resolvida'; });
+    }
+    Banco.salvarLocal(CHAVE.pendencias, Banco.pendencias);
+  }
+
   function pendenciaDaApi(bruto) {
     return {
       id: bruto.id,
@@ -385,6 +408,35 @@
 
     /* ------------------------------- carga -------------------------------- */
 
+    /* ------------------------------ sessão -------------------------------- */
+
+    token: function () {
+      try { return global.localStorage.getItem('lirios.token') || ''; } catch (erro) { return ''; }
+    },
+
+    guardarSessao: function (usuario) {
+      try {
+        global.localStorage.setItem('lirios.token', usuario.token || '');
+        global.localStorage.setItem('lirios.usuario', JSON.stringify({ nome: usuario.nome, email: usuario.email }));
+      } catch (erro) { /* navegador sem armazenamento: o login vale só nesta página */ }
+    },
+
+    limparSessao: function () {
+      try {
+        global.localStorage.removeItem('lirios.token');
+        global.localStorage.removeItem('lirios.usuario');
+      } catch (erro) { /* ignora */ }
+    },
+
+    /** Encerra a sessão e volta para o login (sem laço se já estiver nele). */
+    sair: function () {
+      Banco.limparSessao();
+      Banco.redirecionando = true;
+      if (global.document && !global.document.getElementById('formLogin') && global.location) {
+        global.location.href = 'login.html';
+      }
+    },
+
     carregar: async function () {
       Banco.baseUrl = global.LIRIOS_API || API_PADRAO;
 
@@ -397,9 +449,17 @@
       try {
         var saude = await Banco.pedir('/health', { timeout: 2500 });
         if (!saude || !saude.ok) throw new Error('banco indisponível');
-        await Banco.carregarApi();
+
+        // A API exige login. Na tela de login só confirmamos que ela existe;
+        // nas demais telas, sem token a pessoa volta para o login.
+        var naTelaDeLogin = !!(global.document && global.document.getElementById('formLogin'));
         Banco.modo = 'api';
+        if (naTelaDeLogin) return Banco.modo;
+        if (!Banco.token()) { Banco.sair(); return Banco.modo; }
+
+        await Banco.carregarApi();
       } catch (erro) {
+        if (erro && erro.status === 401) { Banco.sair(); return 'api'; }
         console.warn('[Banco] API indisponível, usando dados locais:', erro.message);
         Banco.erro = erro;
         Banco.modo = 'local';
@@ -477,7 +537,8 @@
       try {
         var resposta = await global.fetch(Banco.baseUrl + caminho, {
           method: config.method || 'GET',
-          headers: config.corpo ? { 'Content-Type': 'application/json' } : undefined,
+          headers: Object.assign({}, config.corpo ? { 'Content-Type': 'application/json' } : {},
+            Banco.token() ? { Authorization: 'Bearer ' + Banco.token() } : {}),
           body: config.corpo ? JSON.stringify(config.corpo) : undefined,
           signal: controle ? controle.signal : undefined
         });
@@ -492,6 +553,8 @@
           var mensagem = (dados && dados.erro) ? dados.erro : 'Erro ' + resposta.status;
           var problema = new Error(mensagem);
           problema.status = resposta.status;
+          // Sessão vencida ou token inválido: volta para o login (o próprio login não conta).
+          if (resposta.status === 401 && caminho !== '/auth/login') Banco.sair();
           problema.detalhes = dados && dados.detalhes;
           throw problema;
         }
@@ -749,10 +812,12 @@
       if (Banco.modo === 'api') {
         var bruto = await Banco.pedir('/contratos/' + contrato.id + '/assinar', { method: 'PATCH', corpo: {} });
         Object.assign(contrato, contratoDaApi(bruto));
+        await Banco.recarregarPendencias(); // a API pode ter resolvido a pendência de contrato
       } else {
         contrato.status = 'Assinado';
         contrato.assinado = true;
         Banco.salvarLocal(CHAVE.contratos, Banco.contratos);
+        sincronizarPendenciaContratoLocal(contrato.cliente, contrato.cliente_id);
       }
       return contrato;
     },
@@ -769,6 +834,7 @@
         });
         var contrato = contratoDaApi(bruto);
         Banco.contratos.push(contrato);
+        await Banco.recarregarPendencias(); // a API pode ter criado a pendência de contrato
         return contrato;
       }
 
@@ -784,6 +850,7 @@
       };
       Banco.contratos.push(novo);
       Banco.salvarLocal(CHAVE.contratos, Banco.contratos);
+      sincronizarPendenciaContratoLocal(novo.cliente, novo.cliente_id);
       return novo;
     },
 
@@ -850,6 +917,52 @@
       return novo;
     },
 
+    /** Reagenda e/ou altera serviço e observação de uma consulta (RF08). */
+    atualizarAgendamento: async function (id, dados) {
+      var atual = Banco.agenda.filter(function (a) { return a.id === id; })[0];
+      if (!atual) throw new Error('Agendamento não encontrado.');
+
+      var inicioNovo = dados.inicio || atual.inicio;
+      var mudouHorario = String(inicioNovo).slice(0, 16) !== String(atual.inicio).slice(0, 16);
+
+      if (Banco.modo === 'api') {
+        var corpo = {};
+        if (mudouHorario) corpo.inicio = inicioNovo;
+        if (dados.servico_id && Number(dados.servico_id) !== Number(atual.servico_id)) corpo.servico_id = dados.servico_id;
+        if ('observacao' in dados && (dados.observacao || '') !== (atual.observacao || '')) {
+          corpo.observacao = dados.observacao || null;
+        }
+        if (!Object.keys(corpo).length) return atual;
+
+        var bruto = await Banco.pedir('/agenda/' + id, { method: 'PUT', corpo: corpo });
+        Object.assign(atual, agendamentoDaApi(bruto));
+        return atual;
+      }
+
+      // modo local: mesma regra de conflito da API
+      if (mudouHorario) {
+        var comeco = new Date(String(inicioNovo).replace(' ', 'T')).getTime();
+        var fim = comeco + (atual.duracao_min || 60) * 60000;
+        var conflito = Banco.agenda.some(function (outro) {
+          if (outro.id === id || outro.status !== 'agendado') return false;
+          var c = new Date(String(outro.inicio).replace(' ', 'T')).getTime();
+          return c < fim && c + (outro.duracao_min || 60) * 60000 > comeco;
+        });
+        if (conflito) throw new Error('Já existe uma consulta nesse horário.');
+
+        // o lembrete antigo (status guardado) não vale para a nova data
+        var guardados = lerLocal('lirios.lembretes') || {};
+        delete guardados[id];
+        gravarLocal('lirios.lembretes', guardados);
+      }
+
+      atual.inicio = inicioNovo;
+      if (dados.servico) atual.servico = dados.servico;
+      if ('observacao' in dados) atual.observacao = dados.observacao || '';
+      Banco.salvarLocal(CHAVE.agenda, Banco.agenda);
+      return atual;
+    },
+
     removerAgendamento: async function (id) {
       if (Banco.modo === 'api') {
         await Banco.pedir('/agenda/' + id, { method: 'DELETE' });
@@ -871,6 +984,12 @@
 
     /* ----------------------------- pendências ----------------------------- */
 
+    recarregarPendencias: async function () {
+      if (Banco.modo !== 'api') return;
+      var lista = await Banco.pedir('/pendencias');
+      Banco.pendencias = (lista || []).map(pendenciaDaApi);
+    },
+
     pendenciasAbertas: function () {
       return Banco.pendencias.filter(function (p) { return p.status === 'aberta'; });
     },
@@ -884,6 +1003,103 @@
         Banco.salvarLocal(CHAVE.pendencias, Banco.pendencias);
       }
       return pendencia;
+    },
+
+    // ---- Documentos anexados à ficha (PDF, imagem, Word, TXT) ----------------
+    DOCUMENTO_MAX_BYTES: 5 * 1024 * 1024,
+    DOCUMENTO_MAX_BYTES_LOCAL: 600 * 1024,   // modo local usa o localStorage do navegador
+
+    listarDocumentos: async function (clienteId) {
+      if (Banco.modo === 'api') {
+        return await Banco.pedir('/documentos?cliente_id=' + encodeURIComponent(clienteId));
+      }
+      return (lerLocal(CHAVE.documentos) || [])
+        .filter(function (d) { return Number(d.cliente_id) === Number(clienteId); })
+        .map(function (d) {
+          return { id: d.id, cliente_id: d.cliente_id, nome: d.nome, tipo_mime: d.tipo_mime,
+                   tamanho: d.tamanho, criado_em: d.criado_em };
+        })
+        .reverse();
+    },
+
+    adicionarDocumento: async function (clienteId, arquivo) {
+      var limite = Banco.modo === 'api' ? Banco.DOCUMENTO_MAX_BYTES : Banco.DOCUMENTO_MAX_BYTES_LOCAL;
+      if (!arquivo) throw new Error('Escolha um arquivo.');
+      if (arquivo.size > limite) {
+        throw new Error('O arquivo passa de ' + Math.round(limite / 1024 / 1024 * 10) / 10 + ' MB' +
+          (Banco.modo === 'api' ? '.' : ' (limite do modo sem servidor).'));
+      }
+
+      var dataUrl = await new Promise(function (resolver, rejeitar) {
+        var leitor = new global.FileReader();
+        leitor.onload = function () { resolver(String(leitor.result)); };
+        leitor.onerror = function () { rejeitar(new Error('Não foi possível ler o arquivo.')); };
+        leitor.readAsDataURL(arquivo);
+      });
+
+      if (Banco.modo === 'api') {
+        return await Banco.pedir('/documentos', {
+          method: 'POST',
+          corpo: { cliente_id: clienteId, nome: arquivo.name, conteudo_base64: dataUrl }
+        });
+      }
+
+      var todos = lerLocal(CHAVE.documentos) || [];
+      var novo = {
+        id: proximoId(), cliente_id: clienteId, nome: arquivo.name,
+        tipo_mime: arquivo.type || 'application/octet-stream', tamanho: arquivo.size,
+        criado_em: new Date().toISOString().slice(0, 19).replace('T', ' '),
+        dataUrl: dataUrl
+      };
+      todos.push(novo);
+      if (!gravarLocal(CHAVE.documentos, todos)) {
+        throw new Error('Sem espaço no navegador para guardar este arquivo.');
+      }
+      return novo;
+    },
+
+    /** Abre o arquivo numa aba nova (ou baixa, se o navegador bloquear a aba). */
+    abrirDocumento: async function (documento) {
+      var janela = global.open('', '_blank');
+      var endereco;
+
+      try {
+        if (Banco.modo === 'api') {
+          var resposta = await global.fetch(Banco.baseUrl + '/documentos/' + documento.id + '/arquivo', {
+            headers: Banco.token() ? { Authorization: 'Bearer ' + Banco.token() } : {}
+          });
+          if (resposta.status === 401) Banco.sair();
+          if (!resposta.ok) throw new Error('Não foi possível abrir o documento.');
+          endereco = global.URL.createObjectURL(await resposta.blob());
+        } else {
+          var guardado = (lerLocal(CHAVE.documentos) || []).filter(function (d) { return d.id === documento.id; })[0];
+          if (!guardado) throw new Error('Documento não encontrado.');
+          // o Chrome bloqueia abrir endereços data: direto; convertemos em blob
+          endereco = global.URL.createObjectURL(await (await global.fetch(guardado.dataUrl)).blob());
+        }
+      } catch (erro) {
+        if (janela) janela.close();
+        throw erro;
+      }
+
+      if (janela) {
+        janela.location.href = endereco;
+      } else {
+        var link = global.document.createElement('a');
+        link.href = endereco;
+        link.download = documento.nome;
+        global.document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+    },
+
+    removerDocumento: async function (id) {
+      if (Banco.modo === 'api') {
+        await Banco.pedir('/documentos/' + id, { method: 'DELETE' });
+        return;
+      }
+      gravarLocal(CHAVE.documentos, (lerLocal(CHAVE.documentos) || []).filter(function (d) { return d.id !== id; }));
     },
 
     criarPendencia: async function (dados) {

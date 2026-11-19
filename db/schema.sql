@@ -35,6 +35,7 @@ DROP VIEW IF EXISTS vw_resumo_cliente;
 DROP VIEW IF EXISTS vw_atendimentos_detalhados;
 DROP VIEW IF EXISTS vw_gestacao_atual;
 
+DROP TABLE IF EXISTS documentos;
 DROP TABLE IF EXISTS lembretes;
 DROP TABLE IF EXISTS pendencias;
 DROP TABLE IF EXISTS agendamentos;
@@ -270,7 +271,7 @@ CREATE INDEX idx_agenda_status  ON agendamentos (status);
 CREATE TABLE pendencias (
   id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
   cliente_id    INT UNSIGNED NOT NULL,
-  tipo          ENUM('contrato','exame','confirmacao','anotacao','outro') NOT NULL DEFAULT 'outro',
+  tipo          ENUM('contrato','exame','confirmacao','anotacao','pagamento','outro') NOT NULL DEFAULT 'outro',
   descricao     VARCHAR(255) NOT NULL,
   status        ENUM('aberta','resolvida') NOT NULL DEFAULT 'aberta',
   resolvido_em  DATETIME NULL,
@@ -287,6 +288,27 @@ CREATE TABLE pendencias (
 
 CREATE INDEX idx_pendencias_status  ON pendencias (status);
 CREATE INDEX idx_pendencias_cliente ON pendencias (cliente_id, status);
+
+
+-- ============================================================================
+-- 9b. DOCUMENTOS — arquivos anexados à ficha da cliente
+-- ============================================================================
+CREATE TABLE documentos (
+  id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  cliente_id    INT UNSIGNED NOT NULL,
+  nome          VARCHAR(160) NOT NULL,
+  tipo_mime     VARCHAR(100) NOT NULL,
+  tamanho       INT UNSIGNED NOT NULL,
+  conteudo      LONGBLOB NOT NULL,
+  criado_em     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT fk_documentos_cliente
+    FOREIGN KEY (cliente_id) REFERENCES clientes (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Arquivos anexados à ficha da cliente (PDF, imagens, Word)';
+
+CREATE INDEX idx_documentos_cliente ON documentos (cliente_id, criado_em);
 
 
 -- ============================================================================

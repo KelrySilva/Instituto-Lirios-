@@ -1054,6 +1054,88 @@
         : '<p class="muted" style="margin:0;">Nenhum contrato registrado para esta cliente.</p>';
     }
 
+    function formatarTamanho(bytes) {
+      if (bytes >= 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1).replace('.', ',') + ' MB';
+      return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+    }
+
+    /** Aba Documentos: lista os arquivos da cliente e permite anexar novos. */
+    async function renderizarDocumentos() {
+      var painel = document.querySelector('.tab-panel[data-panel="documentos"]');
+      if (!painel) return;
+
+      var lista = [];
+      try {
+        lista = await Banco.listarDocumentos(cliente.id);
+      } catch (erro) {
+        painel.innerHTML = '<p class="muted" style="margin:0;">Não foi possível carregar os documentos.</p>';
+        return;
+      }
+
+      painel.innerHTML =
+        '<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">' +
+          '<button type="button" class="btn btn-primary btn-sm" id="btnAdicionarDocumento">+ Adicionar documento</button>' +
+          '<input type="file" id="arquivoDocumento" hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.doc,.docx">' +
+        '</div>' +
+        (lista.length
+          ? '<div class="agenda-list">' + lista.map(function (doc) {
+              return '<div class="agenda-item">' +
+                '<span class="time">' + esc(String(doc.criado_em || '').slice(0, 10).split('-').reverse().join('/')) + '</span>' +
+                '<span class="who">' + esc(doc.nome) + '</span>' +
+                '<span class="what muted">' + esc(formatarTamanho(doc.tamanho)) + '</span>' +
+                '<button type="button" class="btn btn-ghost btn-sm" data-doc-abrir="' + doc.id + '">Abrir</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" data-doc-excluir="' + doc.id + '">Excluir</button>' +
+                '</div>';
+            }).join('') + '</div>'
+          : '<p class="muted" style="margin:0;">Nenhum documento anexado ainda.</p>');
+
+      var entrada = document.getElementById('arquivoDocumento');
+      document.getElementById('btnAdicionarDocumento').addEventListener('click', function () { entrada.click(); });
+
+      entrada.addEventListener('change', async function () {
+        var arquivo = entrada.files && entrada.files[0];
+        if (!arquivo) return;
+        try {
+          await Banco.adicionarDocumento(cliente.id, arquivo);
+          toast('Documento "' + arquivo.name + '" anexado.');
+          renderizarDocumentos();
+        } catch (erro) {
+          avisarErro(erro);
+          entrada.value = '';
+        }
+      });
+
+      Array.prototype.forEach.call(painel.querySelectorAll('[data-doc-abrir]'), function (botao) {
+        botao.addEventListener('click', async function () {
+          var doc = lista.filter(function (d) { return String(d.id) === botao.dataset.docAbrir; })[0];
+          try { await Banco.abrirDocumento(doc); } catch (erro) { avisarErro(erro); }
+        });
+      });
+
+      Array.prototype.forEach.call(painel.querySelectorAll('[data-doc-excluir]'), function (botao) {
+        botao.addEventListener('click', function () {
+          var doc = lista.filter(function (d) { return String(d.id) === botao.dataset.docExcluir; })[0];
+          modalGenerico({
+            titulo: 'Excluir documento',
+            subtitulo: doc.nome,
+            html: '<p>Este arquivo será removido da ficha. Essa ação não pode ser desfeita.</p>',
+            acoes: [
+              { rotulo: 'Cancelar' },
+              {
+                rotulo: 'Excluir', variante: 'primary',
+                aoClicar: async function () {
+                  try { await Banco.removerDocumento(doc.id); } catch (erro) { avisarErro(erro); return; }
+                  fecharGenerico();
+                  toast('Documento excluído.');
+                  renderizarDocumentos();
+                }
+              }
+            ]
+          });
+        });
+      });
+    }
+
     function abrirDetalhesAtendimento(id) {
       var registro = null;
       Banco.atendimentos.forEach(function (item) {
@@ -1143,6 +1225,7 @@
       renderizarAtendimentos();
       renderizarExames();
       renderizarContratos();
+      renderizarDocumentos();
 
       try {
         var url = urlFicha(cliente.nome);
@@ -1527,6 +1610,52 @@
 
     renderTabela();
 
+    // Botão "Novo contrato": cria o contrato como PENDENTE. O sistema gera sozinho a
+    // pendência "Contrato aguardando assinatura" e a resolve quando ele for assinado.
+    var botaoNovo = document.getElementById('btnNovoContrato');
+    if (botaoNovo) {
+      botaoNovo.addEventListener('click', function () {
+        var clientes = Banco.clientes;
+        var servicos = nomesDeServico();
+        if (!clientes.length) { toast('Cadastre uma cliente antes de criar um contrato.'); return; }
+
+        modalGenerico({
+          titulo: 'Novo contrato',
+          subtitulo: 'O contrato começa como pendente, aguardando assinatura',
+          html: campoHTML({ nome: 'cliente', label: 'Cliente', valor: clientes[0].nome,
+                            opcoes: clientes.map(function (c) { return c.nome; }) }) +
+                campoHTML({ nome: 'servico', label: 'Serviço', valor: servicos[0], opcoes: servicos }),
+          acoes: [
+            { rotulo: 'Cancelar' },
+            {
+              rotulo: 'Criar contrato', variante: 'primary',
+              aoClicar: async function (ctx) {
+                var dados = lerCampos(ctx.corpo);
+                var cliente = acharClientePorNome(Banco.clientes, dados.cliente);
+                var servico = Banco.servicoPorNome(dados.servico);
+                if (!cliente || !servico) { toast('Escolha a cliente e o serviço.'); return; }
+                if (acharContrato(cliente.nome, servico.nome)) {
+                  toast(cliente.nome + ' já tem contrato de ' + servico.nome + '.');
+                  return;
+                }
+                try {
+                  await Banco.criarContrato({
+                    cliente_id: cliente.id, cliente: cliente.nome,
+                    servico_id: servico.id, servico: servico.nome, valor: servico.valor
+                  });
+                  renderTabela();
+                  fecharGenerico();
+                  toast('Contrato de ' + cliente.nome + ' criado. Veja a pendência em Pendências.');
+                } catch (erro) {
+                  avisarErro(erro);
+                }
+              }
+            }
+          ]
+        });
+      });
+    }
+
     tabela.addEventListener('click', function (evento) {
       var alvo = evento.target.closest('a.small, [data-acao="ver-contrato"]');
       if (!alvo) return;
@@ -1562,6 +1691,7 @@
       exame: 'Exame',
       confirmacao: 'Confirmação',
       anotacao: 'Anotação',
+      pagamento: 'Pagamento',
       outro: 'Outro'
     };
 
@@ -1634,6 +1764,48 @@
 
     renderTabela();
     atualizarContadores();
+
+    // Botão "Nova pendência": cria uma pendência manual (inclusive de pagamento).
+    var botaoNova = document.getElementById('btnNovaPendencia');
+    if (botaoNova) {
+      botaoNova.addEventListener('click', function () {
+        var clientes = Banco.clientes;
+        if (!clientes.length) { toast('Cadastre uma cliente antes de criar uma pendência.'); return; }
+        var rotulos = Object.keys(ROTULO_TIPO).map(function (k) { return ROTULO_TIPO[k]; });
+
+        modalGenerico({
+          titulo: 'Nova pendência',
+          subtitulo: 'Registre o que precisa de atenção',
+          html: campoHTML({ nome: 'cliente', label: 'Cliente', valor: clientes[0].nome,
+                            opcoes: clientes.map(function (c) { return c.nome; }) }) +
+                campoHTML({ nome: 'tipo', label: 'Tipo', valor: ROTULO_TIPO.outro, opcoes: rotulos }) +
+                campoHTML({ nome: 'descricao', label: 'Descrição', linha: 2 }),
+          acoes: [
+            { rotulo: 'Cancelar' },
+            {
+              rotulo: 'Salvar', variante: 'primary',
+              aoClicar: async function (ctx) {
+                var dados = lerCampos(ctx.corpo);
+                var cliente = clientes.filter(function (c) { return c.nome === dados.cliente; })[0];
+                var tipo = Object.keys(ROTULO_TIPO).filter(function (k) { return ROTULO_TIPO[k] === dados.tipo; })[0] || 'outro';
+                if (!cliente || !dados.descricao) { toast('Preencha a descrição da pendência.'); return; }
+                try {
+                  await Banco.criarPendencia({
+                    cliente_id: cliente.id, cliente: cliente.nome, tipo: tipo, descricao: dados.descricao
+                  });
+                  renderTabela();
+                  atualizarContadores();
+                  fecharGenerico();
+                  toast('Pendência criada para ' + cliente.nome + '.');
+                } catch (erro) {
+                  avisarErro(erro);
+                }
+              }
+            }
+          ]
+        });
+      });
+    }
   }
 
   /* ------------------------------- 13. Relatórios ------------------------- */
@@ -1850,9 +2022,67 @@
           });
           rodape.insertBefore(excluir, rodape.firstChild);
         }
+
+        // Reagendar / alterar: só para consultas que existem no banco e ainda estão marcadas.
+        var antigoReagendar = rodape.querySelector('[data-reagendar-agendamento]');
+        if (antigoReagendar) antigoReagendar.remove();
+
+        if (evento.id && (!evento.status || evento.status === 'agendado')) {
+          var reagendar = document.createElement('button');
+          reagendar.type = 'button';
+          reagendar.className = 'btn btn-primary';
+          reagendar.setAttribute('data-reagendar-agendamento', '1');
+          reagendar.textContent = 'Reagendar';
+          reagendar.addEventListener('click', function () {
+            fecharOverlay(modalDetalhes);
+            abrirReagendamento(iso, evento);
+          });
+          rodape.insertBefore(reagendar, rodape.firstChild);
+        }
       }
 
       abrirOverlay(modalDetalhes);
+    }
+
+    /** Janela para mudar data, horário, serviço e observação de uma consulta (RF08). */
+    function abrirReagendamento(iso, evento) {
+      var servicos = nomesDeServico();
+      modalGenerico({
+        titulo: 'Reagendar consulta',
+        subtitulo: evento.w,
+        html: campoHTML({ nome: 'data', label: 'Data', tipo: 'date', valor: iso }) +
+              campoHTML({ nome: 'hora', label: 'Horário', tipo: 'time', valor: evento.t }) +
+              campoHTML({ nome: 'servico', label: 'Serviço', valor: evento.servico || servicos[0], opcoes: servicos }) +
+              campoHTML({ nome: 'observacao', label: 'Observação', valor: evento.observacao || '', linha: 2 }),
+        acoes: [
+          { rotulo: 'Cancelar' },
+          {
+            rotulo: 'Salvar alterações', variante: 'primary',
+            aoClicar: async function (ctx) {
+              var dados = lerCampos(ctx.corpo);
+              if (!dados.data || !dados.hora) { toast('Informe a data e o horário.'); return; }
+              var servicoBanco = Banco.servicoPorNome(dados.servico);
+              try {
+                await Banco.atualizarAgendamento(evento.id, {
+                  inicio: dados.data + ' ' + dados.hora + ':00',
+                  servico: dados.servico,
+                  servico_id: servicoBanco ? servicoBanco.id : null,
+                  observacao: dados.observacao
+                });
+              } catch (erro) {
+                avisarErro(erro);
+                return;
+              }
+              eventos = Banco.eventosPorDia();
+              dataRef = fromISODate(dados.data);
+              if (modo === 'mes') dataRef = new Date(dataRef.getFullYear(), dataRef.getMonth(), 1);
+              render();
+              fecharGenerico();
+              toast('Consulta de ' + evento.w + ' reagendada para ' + formatarBR(dados.data) + ' às ' + dados.hora + '.');
+            }
+          }
+        ]
+      });
     }
 
     function definirModo(novoModo) {
@@ -1983,6 +2213,7 @@
             method: 'POST',
             corpo: { email: email.trim(), senha: senha }
           });
+          Banco.guardarSessao(usuario);
           toast('Bem-vinda, ' + usuario.nome + '.');
           window.setTimeout(function () { irPara('dashboard.html'); }, 400);
         } catch (erro) {
@@ -1993,6 +2224,13 @@
 
       // Sem servidor: entra direto, como na versão de interface.
       irPara('dashboard.html');
+    });
+  }
+
+  /** Botão "Sair" do menu: apaga o login guardado antes de ir para a tela de entrada. */
+  function iniciarSair() {
+    document.querySelectorAll('a[href="login.html"].nav-link').forEach(function (link) {
+      link.addEventListener('click', function () { Banco.limparSessao(); });
     });
   }
 
@@ -2153,6 +2391,7 @@
   document.addEventListener('DOMContentLoaded', async function () {
     // 1) tenta a API (MySQL); se não responder, carrega do localStorage.
     await Banco.carregar();
+    if (Banco.redirecionando) return; // sem login: já estamos indo para a tela de entrada
 
     if (Banco.modo === 'local' && document.querySelector('.main')) {
       console.info('[Lírios] modo local: a API não respondeu em ' + Banco.baseUrl);
@@ -2175,5 +2414,6 @@
     iniciarDashboard();
     iniciarLembretes();
     iniciarLogin();
+    iniciarSair();
   });
 })();

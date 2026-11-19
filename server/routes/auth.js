@@ -4,14 +4,14 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { pool } = require('../db');
 const { rota, texto, HttpError } = require('../http');
+const { criarToken } = require('../auth-token');
 
 const router = express.Router();
 
 /**
  * POST /api/auth/login
- * Valida e-mail e senha (hash bcrypt gravado em usuarios.senha_hash).
- * Nesta etapa devolve os dados do usuário; a emissão de token (JWT) fica
- * para a etapa de autenticação das rotas.
+ * Valida e-mail e senha (hash bcrypt gravado em usuarios.senha_hash) e devolve
+ * os dados do usuário junto com um token, que as demais rotas exigem.
  */
 router.post('/login', rota(async (req, res) => {
   const corpo = req.body || {};
@@ -30,7 +30,8 @@ router.post('/login', rota(async (req, res) => {
     throw new HttpError(401, 'E-mail ou senha inválidos.');
   }
 
-  res.json({ id: usuario.id, nome: usuario.nome, email: usuario.email, perfil: usuario.perfil });
+  const dados = { id: usuario.id, nome: usuario.nome, email: usuario.email, perfil: usuario.perfil };
+  res.json({ ...dados, token: criarToken(dados) });
 }));
 
 module.exports = router;
