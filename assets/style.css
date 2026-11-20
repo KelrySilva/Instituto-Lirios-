@@ -11,11 +11,11 @@
   --cream-200:  #EFDECB;
   --blush-100:  #F2DED0;
   --blush-200:  #E9C9B6;
-  --brown-900:  #3E2A1C;
-  --brown-700:  #5B4030;
-  --brown-500:  #8A6248;
-  --brown-400:  #A9805F;
-  --brown-300:  #C7A489;
+  --brown-900:  #4A2C1B;
+  --brown-700:  #5B3922;
+  --brown-500:  #8F6E4F;
+  --brown-400:  #A8845F;
+  --brown-300:  #C9A98B;
   --taupe-300:  #C3AA9C;
   --taupe-200:  #DCC9BA;
   --white-soft: #FFFDFB;
@@ -40,8 +40,8 @@ html,body{
   font-family:'Manrope', sans-serif;
   color:var(--ink);
   background:
-    radial-gradient(1100px 700px at 8% -10%, #FBF1E6 0%, transparent 55%),
-    linear-gradient(155deg, #F7E9DA 0%, #F0DAC7 45%, #E9CBB8 100%);
+    radial-gradient(1100px 700px at 8% -10%, #FAEFE4 0%, transparent 55%),
+    linear-gradient(155deg, #F9EBDE 0%, #F5E7DA 45%, #EDD6C2 100%);
   background-attachment: fixed;
 }
 
@@ -71,7 +71,7 @@ button{ font-family:inherit; cursor:pointer; }
   flex-shrink:0;
   padding:34px 22px 26px;
   background:
-    linear-gradient(180deg, #F8ECDE 0%, #F1DEC9 100%);
+    linear-gradient(180deg, #F9EDE1 0%, #F5E7DA 100%);
   border-right:1px solid var(--line);
   display:flex;
   flex-direction:column;
@@ -120,6 +120,19 @@ button{ font-family:inherit; cursor:pointer; }
   box-shadow:var(--shadow-1);
 }
 .brand-mark svg{ width:36px; height:36px; }
+
+.brand-logo{
+  display:block;
+  width:100%;
+  max-width:190px;
+  height:auto;
+}
+.login-logo{
+  display:block;
+  width:100%;
+  max-width:340px;
+  height:auto;
+}
 
 .brand small{
   display:block;
@@ -410,7 +423,7 @@ td.name{ font-weight:600; color:var(--brown-900); }
   flex:1;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   text-align:center;
-  background:linear-gradient(160deg, #F2DECB, #E7C6B0);
+  background:linear-gradient(160deg, #F5E7DA, #EDD6C2);
   padding:50px;
 }
 
