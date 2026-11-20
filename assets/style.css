@@ -440,7 +440,7 @@ td.name{ font-weight:600; color:var(--brown-900); }
 .login-logo{
   display:block;
   width:100%;
-  max-width:380px;
+  max-width:480px;
   height:auto;
 }
 
