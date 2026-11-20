@@ -130,7 +130,7 @@ button{ font-family:inherit; cursor:pointer; }
 .login-logo{
   display:block;
   width:100%;
-  max-width:340px;
+  max-width:480px;
   height:auto;
 }
 
@@ -407,6 +407,16 @@ td.name{ font-weight:600; color:var(--brown-900); }
 .field-group{ margin-bottom:16px; }
 
 /* ---------- Login ---------- */
+/* Preenchimento automático do navegador (e-mail/senha salvos) sem o azul padrão */
+.field-input:-webkit-autofill,
+.field-input:-webkit-autofill:hover,
+.field-input:-webkit-autofill:focus{
+  -webkit-box-shadow:0 0 0 1000px #FBF3EA inset;
+  -webkit-text-fill-color:var(--ink);
+  caret-color:var(--ink);
+  transition:background-color 9999s ease-in-out 0s;
+}
+
 .login-wrap{
   min-height:100vh;
   display:flex;
@@ -423,8 +433,8 @@ td.name{ font-weight:600; color:var(--brown-900); }
   flex:1;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   text-align:center;
-  background:linear-gradient(160deg, #F5E7DA, #EDD6C2);
-  padding:50px;
+  background:transparent;   /* mesmo fundo da esquerda: sem emenda no meio */
+  padding:40px;
 }
 
 .login-logo{
