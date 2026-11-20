@@ -103,6 +103,13 @@ button{ font-family:inherit; cursor:pointer; }
   border-bottom:1px solid var(--line);
 }
 
+.brand-logo{
+  display:block;
+  width:100%;
+  max-width:200px;
+  height:auto;
+}
+
 .brand-mark{
   width:64px; height:64px;
   border-radius:50%;
@@ -405,6 +412,13 @@ td.name{ font-weight:600; color:var(--brown-900); }
   text-align:center;
   background:linear-gradient(160deg, #F2DECB, #E7C6B0);
   padding:50px;
+}
+
+.login-logo{
+  display:block;
+  width:100%;
+  max-width:380px;
+  height:auto;
 }
 
 @media (max-width: 900px){
