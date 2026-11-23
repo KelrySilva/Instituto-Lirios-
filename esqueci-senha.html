@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Esqueci minha senha · Instituto Lírios</title>
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-form-side">
+    <form class="login-form" id="formEsqueciSenha">
+      <h1 style="font-size:30px; margin-bottom:4px;">Esqueceu a senha?</h1>
+      <p class="muted" style="margin-bottom:28px;">Informe o e-mail de acesso e enviaremos um link para você criar uma nova senha.</p>
+
+      <div class="field-group">
+        <label class="field-label" for="esqueciEmail">E-mail</label>
+        <input class="field-input" id="esqueciEmail" type="email" placeholder="seu@email.com" autocomplete="username" required>
+      </div>
+
+      <p id="esqueciMensagem" class="small" role="status" style="min-height:20px; margin:0 0 16px;"></p>
+
+      <button type="submit" id="btnEsqueci" class="btn btn-primary" style="width:100%; justify-content:center; padding:13px;">Enviar link</button>
+      <p class="small" style="text-align:center; margin-top:18px;"><a href="login.html" style="color:var(--brown-500); font-weight:600;">Voltar para o login</a></p>
+    </form>
+
+    <div class="login-form" id="esqueciEnviado" style="display:none;" role="status" aria-live="polite">
+      <div style="width:56px; height:56px; border-radius:50%; background:var(--ok-bg); color:var(--ok-tx); display:flex; align-items:center; justify-content:center; margin-bottom:18px;">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+      </div>
+      <h1 style="font-size:30px; margin-bottom:6px;">E-mail enviado!</h1>
+      <p style="margin-bottom:4px;">Enviamos o link para <strong id="esqueciEnviadoPara"></strong>.</p>
+      <p class="muted" style="margin-bottom:6px;">Confira a caixa de entrada e também o spam. O link vale por 30 minutos.</p>
+      <p class="small muted" style="margin-bottom:26px;">Por segurança, não informamos se o endereço está cadastrado.</p>
+
+      <div style="padding:16px 18px; border-radius:14px; background:var(--cream-100); border:1px solid var(--line); margin-bottom:18px;">
+        <p class="small muted" style="margin-bottom:6px;">Não chegou?</p>
+        <p id="esqueciContagem" style="font-size:15px; margin-bottom:12px;"></p>
+        <button type="button" id="btnReenviar" class="btn btn-primary" style="width:100%; justify-content:center; padding:12px;" disabled>Reenviar e-mail</button>
+      </div>
+
+      <p class="small" style="text-align:center; margin-top:6px;">
+        <a href="#" id="esqueciOutroEmail" style="color:var(--brown-500); font-weight:600;">Usar outro e-mail</a>
+        &nbsp;·&nbsp;
+        <a href="login.html" style="color:var(--brown-500); font-weight:600;">Voltar para o login</a>
+      </p>
+    </div>
+  </div>
+
+  <div class="login-hero">
+    <img class="login-logo" src="assets/logo.png" alt="Dra. Katlhen Carvalho — Cuidando de quem gesta, do bebê e da família">
+  </div>
+</div>
+<script src="assets/banco.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

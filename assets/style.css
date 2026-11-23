@@ -234,6 +234,14 @@ button{ font-family:inherit; cursor:pointer; }
   font-weight:600;
   transition:transform .12s ease, box-shadow .12s ease, background .15s ease;
 }
+/* Botão desabilitado (ex.: "Reenviar e-mail" durante a contagem): fica apagado e sem efeito */
+.btn:disabled, .btn[disabled]{
+  opacity:.45;
+  cursor:not-allowed;
+  box-shadow:none;
+  transform:none;
+  filter:grayscale(.25);
+}
 .btn-primary{
   background:linear-gradient(160deg, var(--brown-500), var(--brown-700));
   color:var(--white-soft);
@@ -314,6 +322,9 @@ td.name{ font-weight:600; color:var(--brown-900); }
 }
 .badge-ok{ background:var(--ok-bg); color:var(--ok-tx); }
 .badge-warn{ background:var(--warn-bg); color:var(--warn-tx); }
+.badge-off{ background:#ece8e4; color:#6f665e; }
+.badge-botao{ border:0; font:inherit; font-size:inherit; cursor:pointer; }
+.badge-botao:hover{ filter:brightness(.95); }
 
 .row-actions{
   display:flex; justify-content:flex-end;

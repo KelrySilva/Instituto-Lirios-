@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Criar nova senha · Instituto Lírios</title>
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-form-side">
+    <form class="login-form" id="formRedefinirSenha">
+      <h1 style="font-size:30px; margin-bottom:4px;">Criar nova senha</h1>
+      <p class="muted" style="margin-bottom:28px;">Escolha uma senha só sua para entrar no sistema.</p>
+
+      <div id="redefinirInvalido" class="small" style="display:none; margin-bottom:20px; padding:14px 16px; border-radius:12px; background:var(--warn-bg); color:var(--warn-tx);">
+        Este link não é válido ou já venceu. <a href="esqueci-senha.html" style="font-weight:700; text-decoration:underline;">Peça um novo link</a>.
+      </div>
+
+      <div id="redefinirCampos">
+        <div class="field-group">
+          <label class="field-label" for="redefinirNova">Nova senha</label>
+          <input class="field-input" id="redefinirNova" type="password" autocomplete="new-password" required>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="redefinirConfirma">Repita a nova senha</label>
+          <input class="field-input" id="redefinirConfirma" type="password" autocomplete="new-password" required>
+        </div>
+        <p class="small muted" style="margin-bottom:12px;">Use pelo menos 8 caracteres, com letras e números.</p>
+        <p id="redefinirErro" class="small" role="alert" style="color:var(--warn-tx); min-height:18px; margin:0 0 12px;"></p>
+
+        <button type="submit" id="btnRedefinir" class="btn btn-primary" style="width:100%; justify-content:center; padding:13px;">Salvar nova senha</button>
+      </div>
+      <p class="small" style="text-align:center; margin-top:18px;"><a href="login.html" style="color:var(--brown-500); font-weight:600;">Voltar para o login</a></p>
+    </form>
+  </div>
+
+  <div class="login-hero">
+    <img class="login-logo" src="assets/logo.png" alt="Dra. Katlhen Carvalho — Cuidando de quem gesta, do bebê e da família">
+  </div>
+</div>
+<script src="assets/banco.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

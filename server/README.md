@@ -167,8 +167,73 @@ basta declarar antes dos scripts:
 <script>window.LIRIOS_API = 'http://192.168.0.10:3000/api';</script>
 ```
 
-Credenciais criadas pelo `seed.sql`: **katlhen@lirios.com.br** / **senha1234**
-(já preenchidas na tela de login para facilitar a demonstração).
+O `seed.sql` cria o usuário **katlhen@lirios.com.br** **sem senha**. Defina a sua com:
+
+```bash
+node definir-senha.js katlhen@lirios.com.br
+```
+
+O mesmo comando serve para quem esqueceu a senha. Depois do primeiro acesso, a senha também pode ser trocada em **Configurações** no menu do sistema.
+
+## Recuperação de senha por e-mail
+
+Na tela de login, **Esqueci minha senha** envia um link (vale 30 minutos e só funciona uma vez)
+para a pessoa criar uma nova senha, sem depender de ninguém da equipe.
+
+1. Crie (ou escolha) uma conta de e-mail só para o sistema. Com Gmail: ative a verificação em
+   duas etapas e crie uma **senha de app** em <https://myaccount.google.com/apppasswords>.
+2. No arquivo `server/.env`, preencha `SMTP_USER` (o e-mail), `SMTP_PASS` (a senha de app) e
+   `APP_URL` (o endereço em que o sistema abre no navegador). Os demais campos já vêm prontos
+   no `.env.example`.
+3. Teste: `node testar-email.js seu@email.com`. Reinicie a API depois de editar o `.env`.
+
+Sem o SMTP configurado, a API continua funcionando e mostra o link no terminal (útil para testar).
+Se mesmo assim ninguém conseguir recuperar o acesso, o administrador pode definir uma senha com
+`node definir-senha.js <email>`.
+
+## Backup do banco
+
+Os dados das clientes só existem no MySQL. Sem backup, um HD com defeito ou um
+formato do computador apaga tudo. O sistema traz dois comandos:
+
+```bash
+npm run backup                                  # cria backups/lirios-AAAA-MM-DD_HHMMSS.sql.gz
+npm run restaurar -- backups/ARQUIVO.sql.gz --sim   # volta o banco para aquele ponto
+```
+
+- O backup usa o `mysqldump` (vem com o MySQL). Se o sistema não o achar, coloque o
+  caminho em `MYSQLDUMP_PATH` no `.env`.
+- Cada arquivo é conferido ao ser criado; se estiver vazio ou cortado, é descartado
+  e o comando termina com erro (nunca fica um backup "de mentira").
+- Ficam guardados os 30 mais recentes (`BACKUP_MANTER`).
+- `BACKUP_COPIAR_PARA` guarda uma cópia em outra pasta ou disco (pen drive, HD
+  externo, OneDrive). **Um backup só no mesmo computador não protege de perda ou
+  roubo do computador.**
+- Restaurar **substitui** os dados atuais. Por segurança exige `--sim` e, antes,
+  guarda o estado atual em `backups/antes-de-restaurar-...`.
+- Os arquivos têm dados de saúde (LGPD): guarde-os em local protegido e **nunca
+  os envie ao GitHub** (a pasta `backups/` já está no `.gitignore`).
+- Ao iniciar, a API avisa no terminal se não há backup ou se o último tem mais de 2 dias.
+
+### Backup automático diário (Windows)
+
+1. Abra o Prompt de Comando **como administrador** e rode (ajuste o caminho da pasta `server`):
+
+   ```
+   schtasks /Create /SC DAILY /ST 20:00 /TN "Backup Instituto Lirios" /TR "\"C:\caminho\Instituto-Lirios-\server\backup-diario.bat\""
+   ```
+
+2. Teste na hora: `schtasks /Run /TN "Backup Instituto Lirios"` e veja se apareceu um arquivo novo em `server\backups`.
+3. Se o computador costuma estar desligado às 20h, abra o *Agendador de Tarefas*, entre nas
+   propriedades da tarefa, aba *Configurações*, e marque "Executar a tarefa o mais rápido
+   possível após uma inicialização agendada perdida".
+4. O resultado de cada execução fica em `server\backups\backup.log`.
+
+### Teste de restauração (faça uma vez, antes de usar de verdade)
+
+Um backup que nunca foi restaurado é só uma esperança. Teste: faça um backup, apague
+uma cliente de teste no sistema, rode `npm run restaurar -- <arquivo> --sim`, reinicie a
+API e confira que a cliente voltou.
 
 ## Decisões de implementação
 

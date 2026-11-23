@@ -21,7 +21,7 @@ db/
 O script cria o banco (`CREATE DATABASE IF NOT EXISTS instituto_lirios`), então
 não precisa criar nada antes.
 
-> Login do usuário criado pelo seed: **katlhen@lirios.com.br** / **senha1234**
+> O seed cria o usuário **katlhen@lirios.com.br** sem senha. Antes de entrar, rode `node definir-senha.js katlhen@lirios.com.br` dentro da pasta `server`.
 > (gravada como hash bcrypt, nunca em texto puro).
 
 ## Modelo

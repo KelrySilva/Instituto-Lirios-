@@ -294,6 +294,7 @@
       servico_principal_id: bruto.servico_principal_id,
       servico: bruto.servico_principal || '',
       status: ROTULOS.status[String(bruto.status).toLowerCase()] || 'Ativa',
+      criado_em: String(bruto.criado_em || '').slice(0, 10),
       gestacao: gestacao
     };
   }
@@ -346,8 +347,18 @@
   }
 
   /** Modo local: mesma regra da API (uma pendência de contrato aberta enquanto houver contrato pendente). */
+  /** O registro é da cliente? Compara pelo id; só usa o nome quando o registro não tem id. */
+  function registroDaCliente(registro, cliente) {
+    if (registro.cliente_id != null && cliente.id != null) {
+      return Number(registro.cliente_id) === Number(cliente.id);
+    }
+    return normalizar(registro.cliente) === normalizar(cliente.nome);
+  }
+
   function sincronizarPendenciaContratoLocal(nomeCliente, idCliente) {
-    function daCliente(item) { return normalizar(item.cliente) === normalizar(nomeCliente); }
+    function daCliente(item) {
+      return registroDaCliente(item, { id: idCliente, nome: nomeCliente });
+    }
 
     var pendentes = Banco.contratos.filter(function (c) {
       return daCliente(c) && !c.assinado && c.status === 'Pendente';
@@ -421,6 +432,100 @@
       } catch (erro) { /* navegador sem armazenamento: o login vale só nesta página */ }
     },
 
+    /**
+     * Números da tela Relatórios, calculados com os dados reais carregados.
+     * periodo: '30d' | '6m' | 'ano'.
+     */
+    relatorio: function (periodo, hoje) {
+      hoje = hoje || new Date();
+      function iso(d) {
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      }
+      var inicio;
+      if (periodo === 'ano') inicio = new Date(hoje.getFullYear(), 0, 1);
+      else if (periodo === '6m') inicio = new Date(hoje.getFullYear(), hoje.getMonth() - 5, 1);
+      else inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - 29);
+      var de = iso(inicio), ate = iso(hoje);
+
+      function dentro(data) { var d = String(data || '').slice(0, 10); return d >= de && d <= ate; }
+
+      var doPeriodo = Banco.atendimentos.filter(function (a) { return dentro(a.data); });
+
+      var porServico = {};
+      doPeriodo.forEach(function (a) {
+        var nome = a.servico || 'Serviço não informado';
+        porServico[nome] = (porServico[nome] || 0) + 1;
+      });
+      var servicos = Object.keys(porServico).map(function (nome) {
+        return { nome: nome, total: porServico[nome] };
+      }).sort(function (a, b) { return b.total - a.total || a.nome.localeCompare(b.nome); });
+
+      var meses = [];
+      for (var i = 5; i >= 0; i--) {
+        var ref = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
+        var chave = ref.getFullYear() + '-' + String(ref.getMonth() + 1).padStart(2, '0');
+        meses.push({
+          chave: chave,
+          rotulo: ref.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''),
+          total: Banco.atendimentos.filter(function (a) { return String(a.data).slice(0, 7) === chave; }).length
+        });
+      }
+
+      return {
+        de: de, ate: ate,
+        atendimentos: doPeriodo.length,
+        novasClientes: Banco.clientes.filter(function (c) { return c.criado_em && dentro(c.criado_em); }).length,
+        pendencias: Banco.pendenciasAbertas().length,
+        servicos: servicos,
+        meses: meses
+      };
+    },
+
+    /** O registro (contrato, atendimento, pendência...) pertence a esta cliente? Por id, não por nome. */
+    mesmaCliente: registroDaCliente,
+
+    /** Telas que funcionam sem estar logado: login e recuperação de senha. */
+    paginaPublica: function () {
+      var doc = global.document;
+      return !!(doc && (doc.getElementById('formLogin') || doc.getElementById('formEsqueciSenha') ||
+        doc.getElementById('formRedefinirSenha')));
+    },
+
+    /** Pede o link de recuperação de senha por e-mail. */
+    esqueciSenha: async function (email) {
+      if (Banco.modo !== 'api') throw new Error('Servidor indisponível. Ligue a API e tente de novo.');
+      return await Banco.pedir('/auth/esqueci-senha', { method: 'POST', corpo: { email: email } });
+    },
+
+    /** Define a nova senha usando o link recebido por e-mail. */
+    redefinirSenha: async function (token, novaSenha) {
+      if (Banco.modo !== 'api') throw new Error('Servidor indisponível. Ligue a API e tente de novo.');
+      return await Banco.pedir('/auth/redefinir-senha', { method: 'POST', corpo: { token: token, nova_senha: novaSenha } });
+    },
+
+    /** Dados do usuário logado guardados no navegador ({ nome, email }) ou null. */
+    usuario: function () {
+      try { return JSON.parse(global.localStorage.getItem('lirios.usuario') || 'null'); } catch (erro) { return null; }
+    },
+
+    /** Leva para a troca de senha quando a API exige (senha de demonstração). */
+    irParaTrocaDeSenha: function () {
+      Banco.redirecionando = true;
+      var jaNaTela = global.document && global.document.getElementById('formTrocarSenha');
+      if (!jaNaTela && global.location) global.location.href = 'configuracoes.html?obrigatorio=1';
+    },
+
+    /** Troca a senha do usuário logado. Guarda o token novo que a API devolve. */
+    trocarSenha: async function (senhaAtual, novaSenha) {
+      if (Banco.modo !== 'api') throw new Error('Servidor indisponível. Ligue a API e tente de novo.');
+      var resposta = await Banco.pedir('/auth/trocar-senha', {
+        method: 'POST',
+        corpo: { senha_atual: senhaAtual, nova_senha: novaSenha }
+      });
+      Banco.guardarSessao(resposta);
+      return resposta;
+    },
+
     limparSessao: function () {
       try {
         global.localStorage.removeItem('lirios.token');
@@ -432,7 +537,7 @@
     sair: function () {
       Banco.limparSessao();
       Banco.redirecionando = true;
-      if (global.document && !global.document.getElementById('formLogin') && global.location) {
+      if (global.document && !Banco.paginaPublica() && global.location) {
         global.location.href = 'login.html';
       }
     },
@@ -452,14 +557,17 @@
 
         // A API exige login. Na tela de login só confirmamos que ela existe;
         // nas demais telas, sem token a pessoa volta para o login.
-        var naTelaDeLogin = !!(global.document && global.document.getElementById('formLogin'));
+        var naTelaDeLogin = Banco.paginaPublica();
+        var naTelaDeSenha = !!(global.document && global.document.getElementById('formTrocarSenha'));
         Banco.modo = 'api';
         if (naTelaDeLogin) return Banco.modo;
         if (!Banco.token()) { Banco.sair(); return Banco.modo; }
+        if (naTelaDeSenha) return Banco.modo; // a tela de troca de senha não precisa dos dados
 
         await Banco.carregarApi();
       } catch (erro) {
         if (erro && erro.status === 401) { Banco.sair(); return 'api'; }
+        if (erro && erro.status === 403 && erro.detalhes === 'TROCAR_SENHA') { Banco.irParaTrocaDeSenha(); return 'api'; }
         console.warn('[Banco] API indisponível, usando dados locais:', erro.message);
         Banco.erro = erro;
         Banco.modo = 'local';
@@ -556,6 +664,7 @@
           // Sessão vencida ou token inválido: volta para o login (o próprio login não conta).
           if (resposta.status === 401 && caminho !== '/auth/login') Banco.sair();
           problema.detalhes = dados && dados.detalhes;
+          if (resposta.status === 403 && problema.detalhes === 'TROCAR_SENHA') Banco.irParaTrocaDeSenha();
           throw problema;
         }
 
@@ -614,6 +723,7 @@
         servico_principal_id: dados.servico_principal_id || null,
         servico: dados.servico || '',
         status: dados.status || 'Ativa',
+        criado_em: new Date().toISOString().slice(0, 10),
         gestacao: null
       };
       Banco.clientes.push(novo);
@@ -733,7 +843,7 @@
 
     atendimentosDoCliente: function (cliente) {
       return Banco.atendimentos
-        .filter(function (registro) { return normalizar(registro.cliente) === normalizar(cliente.nome); })
+        .filter(function (registro) { return registroDaCliente(registro, cliente); })
         .sort(function (a, b) { return String(b.data).localeCompare(String(a.data)) || (b.id - a.id); });
     },
 
@@ -803,7 +913,7 @@
 
     contratoDoCliente: function (cliente, servico) {
       return Banco.contratos.filter(function (contrato) {
-        return normalizar(contrato.cliente) === normalizar(cliente.nome) &&
+        return registroDaCliente(contrato, cliente) &&
           (!servico || normalizar(contrato.servico) === normalizar(servico));
       })[0] || null;
     },
@@ -903,12 +1013,24 @@
         return agendamento;
       }
 
+      // modo local: mesma regra de conflito da API
+      var servicoDaConsulta = Banco.servicoPorNome(dados.servico);
+      var duracaoNova = (servicoDaConsulta && Number(servicoDaConsulta.duracao_min)) || 60;
+      var comecoNovo = new Date(String(dados.inicio).replace(' ', 'T')).getTime();
+      var fimNovo = comecoNovo + duracaoNova * 60000;
+      var ocupado = Banco.agenda.some(function (outro) {
+        if (outro.status !== 'agendado') return false;
+        var c = new Date(String(outro.inicio).replace(' ', 'T')).getTime();
+        return c < fimNovo && c + (outro.duracao_min || 60) * 60000 > comecoNovo;
+      });
+      if (ocupado) throw new Error('Já existe uma consulta nesse horário.');
+
       var novo = {
         id: proximoId(),
         cliente: dados.cliente,
         servico: dados.servico,
         inicio: dados.inicio,
-        duracao_min: 60,
+        duracao_min: duracaoNova,
         status: 'agendado',
         observacao: dados.observacao || ''
       };

@@ -161,3 +161,9 @@ INSERT INTO pendencias (cliente_id, tipo, descricao, status) VALUES
   ((SELECT id FROM clientes WHERE nome = 'Ana Sousa'),     'exame',       'Exame pendente',                 'aberta'),
   ((SELECT id FROM clientes WHERE nome = 'Carla Lima'),    'confirmacao', 'Confirmar consulta',             'aberta'),
   ((SELECT id FROM clientes WHERE nome = 'Júlia Alves'),   'anotacao',    'Anotação do atendimento',        'aberta');
+
+SELECT COUNT(*) FROM instituto_lirios.usuarios;
+SELECT COUNT(*) FROM instituto_lirios.clientes;
+
+UPDATE usuarios SET email = 'institutolirios1@gmail.com' WHERE email = 'katlhen@lirios.com.br';
+SELECT id, nome, email FROM usuarios;

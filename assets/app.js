@@ -240,8 +240,11 @@
     if (campo.opcoes) {
       controle = '<select class="field-input field-select" id="' + id + '" data-campo="' + campo.nome + '">' +
         campo.opcoes.map(function (opcao) {
-          return '<option value="' + esc(opcao) + '"' +
-            (opcao === campo.valor ? ' selected' : '') + '>' + esc(opcao) + '</option>';
+          // opção simples (texto) ou { valor, rotulo } (ex.: cliente: valor = id, rótulo = nome)
+          var valorOpcao = typeof opcao === 'object' ? opcao.valor : opcao;
+          var rotuloOpcao = typeof opcao === 'object' ? opcao.rotulo : opcao;
+          return '<option value="' + esc(valorOpcao) + '"' +
+            (valorOpcao === campo.valor ? ' selected' : '') + '>' + esc(rotuloOpcao) + '</option>';
         }).join('') + '</select>';
     } else if (campo.linha) {
       controle = '<textarea class="field-textarea" id="' + id + '" data-campo="' + campo.nome +
@@ -298,6 +301,39 @@
     return null;
   }
 
+  /** Cliente pelo id (o nome pode se repetir; o id nunca). */
+  function acharClientePorId(lista, id) {
+    if (id === undefined || id === null || id === '') return null;
+    var alvo = Number(id);
+    for (var i = 0; i < lista.length; i++) {
+      if (Number(lista[i].id) === alvo) return lista[i];
+    }
+    return null;
+  }
+
+  /** Cliente indicada em ?cliente= (id; links antigos com nome ainda funcionam). Nunca adivinha outra. */
+  function clienteDaUrl(lista) {
+    var pedido = new URLSearchParams(window.location.search).get('cliente') || '';
+    var achada = null;
+    if (pedido) achada = /^\d+$/.test(pedido) ? acharClientePorId(lista, pedido) : acharClientePorNome(lista, pedido);
+    return { pedido: pedido, cliente: achada };
+  }
+
+  /** Opções de <select> de clientes: valor = id. Se há nomes repetidos, o rótulo ajuda a distinguir. */
+  function opcoesDeClientes(lista) {
+    var repeticoes = {};
+    lista.forEach(function (c) { repeticoes[normalizar(c.nome)] = (repeticoes[normalizar(c.nome)] || 0) + 1; });
+    return lista.map(function (c) {
+      var rotulo = c.nome;
+      if (repeticoes[normalizar(c.nome)] > 1) {
+        var detalhe = [c.nascimento ? 'nasc. ' + nascimentoBR(c.nascimento) : '', c.telefone]
+          .filter(Boolean).join(' · ');
+        rotulo += ' — ' + (detalhe || 'cadastro nº ' + c.id);
+      }
+      return { valor: String(c.id), rotulo: rotulo };
+    });
+  }
+
   /** Nomes de serviço para os selects (do banco, com reserva na lista fixa). */
   function nomesDeServico() {
     var nomes = Banco.servicos.map(function (servico) { return servico.nome; });
@@ -313,12 +349,18 @@
     return servico ? servico.id : null;
   }
 
-  function urlFicha(nome) {
-    return 'ficha-cliente.html?cliente=' + encodeURIComponent(nome);
+  /** Aceita a cliente (objeto), o id, ou — só para links antigos — o nome. */
+  function refDaCliente(cliente) {
+    if (cliente && typeof cliente === 'object') return cliente.id != null ? cliente.id : cliente.nome;
+    return cliente;
   }
 
-  function urlAtendimento(nome) {
-    return 'atendimento.html?cliente=' + encodeURIComponent(nome);
+  function urlFicha(cliente) {
+    return 'ficha-cliente.html?cliente=' + encodeURIComponent(refDaCliente(cliente));
+  }
+
+  function urlAtendimento(cliente) {
+    return 'atendimento.html?cliente=' + encodeURIComponent(refDaCliente(cliente));
   }
 
   function irPara(url) { window.location.href = url; }
@@ -335,6 +377,9 @@
     var corpo = document.getElementById('clientTableBody');
     if (!corpo) return;
 
+    // Vindo de uma tela que precisa de uma cliente escolhida (ex.: ficha sem cliente indicada).
+    if (/[?&]escolha=1/.test(window.location.search)) toast('Escolha uma cliente para abrir a ficha.');
+
     var input = document.getElementById('clientSearch');
     var estado = { termo: '', status: 'todas' };
     var vazio = estadoVazioDepoisDa(corpo.closest('table'), 'Nenhuma cliente encontrada com esse filtro.');
@@ -348,8 +393,7 @@
         var status = badge ? normalizar(badge.textContent) : '';
         var combinaTermo = !estado.termo || texto.indexOf(estado.termo) !== -1;
         var combinaStatus = estado.status === 'todas' ||
-          (estado.status === 'ativa' && status.indexOf('ativa') !== -1) ||
-          (estado.status === 'pendente' && status.indexOf('pendente') !== -1);
+          status === estado.status;
         var mostrar = combinaTermo && combinaStatus;
         linha.style.display = mostrar ? '' : 'none';
         if (mostrar) visiveis++;
@@ -360,20 +404,85 @@
 
     function montarLinha(cliente) {
       var linha = document.createElement('tr');
-      linha.dataset.destino = urlFicha(cliente.nome);
+      linha.dataset.destino = urlFicha(cliente);
+      linha.dataset.clienteId = cliente.id;
       linha.innerHTML =
         '<td class="name">' + esc(cliente.nome) + '</td>' +
         '<td>' + esc(cliente.telefone || '—') + '</td>' +
         '<td>' + esc(cliente.email || '—') + '</td>' +
         '<td>' + esc(cliente.servico || '—') + '</td>' +
-        '<td><span class="badge ' + (cliente.status === 'Pendente' ? 'badge-warn' : 'badge-ok') + '">' +
-        esc(cliente.status || 'Ativa') + '</span></td>' +
+        '<td><button type="button" class="badge badge-botao ' + classeDoStatus(cliente.status) + '" ' +
+        'data-acao="status-cliente" title="Clique para ver detalhes ou mudar o status">' +
+        esc(cliente.status || 'Ativa') + '</button></td>' +
         '<td class="row-actions"><button type="button" class="icon-btn" data-acao="acoes-cliente" ' +
         'aria-label="Ações da cliente">⋮</button></td>';
 
       linha.addEventListener('click', function () { irPara(linha.dataset.destino); });
       ligarAcaoCliente(linha);
+      ligarStatusCliente(linha);
       return linha;
+    }
+
+    function classeDoStatus(status) {
+      return status === 'Pendente' ? 'badge-warn' : (status === 'Inativa' ? 'badge-off' : 'badge-ok');
+    }
+
+    // Clicar no status mostra o que está pendente e permite trocar ali mesmo.
+    function ligarStatusCliente(linha) {
+      var botao = linha.querySelector('[data-acao="status-cliente"]');
+      if (!botao) return;
+
+      botao.addEventListener('click', function (evento) {
+        evento.stopPropagation();
+        var cliente = acharClientePorId(carregarClientes(), linha.dataset.clienteId);
+        if (!cliente) return;
+
+        var contratos = Banco.contratos.filter(function (c) {
+          return Banco.mesmaCliente(c, cliente) && !c.assinado && c.status === 'Pendente';
+        });
+        var pendencias = Banco.pendenciasAbertas().filter(function (p) {
+          return Banco.mesmaCliente(p, cliente);
+        });
+
+        var itens = contratos.map(function (c) { return 'Contrato de ' + c.servico + ' aguardando assinatura'; })
+          .concat(pendencias.filter(function (p) { return p.tipo !== 'contrato'; })
+            .map(function (p) { return ({ exame: 'Exame', confirmacao: 'Confirmação', anotacao: 'Anotação', pagamento: 'Pagamento', outro: 'Outro' }[p.tipo] || 'Pendência') + ': ' + p.descricao; }));
+
+        var detalhe;
+        if (itens.length) {
+          detalhe = '<p class="small" style="margin:0 0 6px;"><strong>O que está pendente:</strong></p><ul class="small" style="margin:0 0 14px;padding-left:18px;">' +
+            itens.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>';
+        } else if (cliente.status === 'Pendente') {
+          detalhe = '<p class="small muted" style="margin:0 0 14px;">Marcada como pendente manualmente. Não há contrato nem pendência aberta no sistema.</p>';
+        } else {
+          detalhe = '<p class="small muted" style="margin:0 0 14px;">Nada pendente para esta cliente.</p>';
+        }
+
+        modalGenerico({
+          titulo: cliente.nome,
+          subtitulo: 'Status do cadastro',
+          html: detalhe + campoHTML({ nome: 'status', label: 'Alterar status', valor: cliente.status || 'Ativa',
+                                      opcoes: ['Ativa', 'Pendente', 'Inativa'] }),
+          acoes: [
+            { rotulo: 'Fechar' },
+            {
+              rotulo: 'Salvar status', variante: 'primary',
+              aoClicar: async function (ctx) {
+                var novo = lerCampos(ctx.corpo).status;
+                try {
+                  await Banco.atualizarCliente(cliente, { status: novo });
+                  renderTabela();
+                  aplicar();
+                  fecharGenerico();
+                  toast(cliente.nome + ' agora está como ' + novo.toLowerCase() + '.');
+                } catch (erro) {
+                  avisarErro(erro);
+                }
+              }
+            }
+          ]
+        });
+      });
     }
 
     function renderTabela() {
@@ -393,7 +502,7 @@
         evento.stopPropagation();
 
         var lista = carregarClientes();
-        var cliente = acharClientePorNome(lista, linha.cells[0].textContent);
+        var cliente = acharClientePorId(lista, linha.dataset.clienteId);
         if (!cliente) return;
 
         var pendente = cliente.status === 'Pendente';
@@ -407,7 +516,7 @@
           acoes: [
             {
               rotulo: 'Abrir ficha',
-              aoClicar: function () { irPara(urlFicha(cliente.nome)); }
+              aoClicar: function () { irPara(urlFicha(cliente)); }
             },
             {
               rotulo: 'Editar cadastro',
@@ -449,7 +558,7 @@
 
     function formularioCliente(linha) {
       var lista = carregarClientes();
-      var atual = linha ? acharClientePorNome(lista, linha.cells[0].textContent) : null;
+      var atual = linha ? acharClientePorId(lista, linha.dataset.clienteId) : null;
       var dadosAtuais = atual || { status: 'Ativa', servico: SERVICOS[0] };
 
       modalGenerico({
@@ -460,7 +569,7 @@
           campoHTML({ nome: 'telefone', label: 'Telefone', valor: dadosAtuais.telefone }) +
           campoHTML({ nome: 'email', label: 'E-mail', tipo: 'email', valor: dadosAtuais.email }) +
           campoHTML({ nome: 'servico', label: 'Serviço principal', valor: dadosAtuais.servico, opcoes: nomesDeServico() }) +
-          campoHTML({ nome: 'status', label: 'Status', valor: dadosAtuais.status, opcoes: ['Ativa', 'Pendente'] }),
+          campoHTML({ nome: 'status', label: 'Status', valor: dadosAtuais.status, opcoes: ['Ativa', 'Pendente', 'Inativa'] }),
         acoes: [
           { rotulo: 'Cancelar' },
           {
@@ -521,7 +630,7 @@
         modalGenerico({
           titulo: 'Filtrar clientes',
           subtitulo: 'Mostre apenas um status por vez',
-          html: campoHTML({ nome: 'status', label: 'Status', valor: estado.status, opcoes: ['todas', 'ativa', 'pendente'] }),
+          html: campoHTML({ nome: 'status', label: 'Status', valor: estado.status, opcoes: ['todas', 'ativa', 'pendente', 'inativa'] }),
           acoes: [
             { rotulo: 'Cancelar' },
             {
@@ -756,10 +865,7 @@
 
   /** Cliente indicada em ?cliente= (usada pelos resumos da Ficha e do Atendimento). */
   function clienteDaPagina() {
-    var pedido = new URLSearchParams(window.location.search).get('cliente');
-    var lista = carregarClientes();
-    var achada = pedido ? acharClientePorNome(lista, pedido) : null;
-    return achada || lista[0] || null;
+    return clienteDaUrl(carregarClientes()).cliente;
   }
 
   /** Liga os botões de resumo. Pode ser chamada de novo após re-renderizar um painel. */
@@ -809,15 +915,17 @@
     var CHAVES = ['nome', 'cpf', 'nascimento', 'telefone', 'email', 'cidade', 'servico'];
 
     var lista = carregarClientes();
-    var parametros = new URLSearchParams(window.location.search);
-    var pedido = parametros.get('cliente');
-    var cliente = pedido ? acharClientePorNome(lista, pedido) : null;
+    var consulta = clienteDaUrl(lista);
+    var cliente = consulta.cliente;
 
-    if (!cliente && pedido) {
-      toast('Cliente "' + pedido + '" não encontrada. Exibindo o primeiro cadastro.');
+    // Menu "Gestantes" (sem cliente no link): abre a primeira gestante, ou o primeiro cadastro.
+    if (!cliente && !consulta.pedido) {
+      cliente = lista.filter(function (c) { return c.gestacao; })[0] || lista[0] || null;
+      if (cliente) window.history.replaceState(null, '', urlFicha(cliente));
     }
-    if (!cliente) cliente = lista[0];
-    if (!cliente) return;
+
+    // Link com cliente que não existe: nunca abre outra no lugar. Volta para a lista.
+    if (!cliente) { irPara('clientes.html?escolha=1'); return; }
 
     /** Diferença em dias entre hoje e uma data ISO (negativa = já passou). */
     function diasAte(iso) {
@@ -1011,7 +1119,7 @@
 
       painel.innerHTML = lista +
         '<a class="btn btn-primary btn-sm" style="margin-top:18px;" href="' +
-        urlAtendimento(cliente.nome) + '">+ Novo atendimento</a>';
+        urlAtendimento(cliente) + '">+ Novo atendimento</a>';
     }
 
     function renderizarExames() {
@@ -1036,7 +1144,7 @@
       if (!painel) return;
 
       var contratos = Banco.contratos.filter(function (registro) {
-        return normalizar(registro.cliente) === normalizar(cliente.nome);
+        return Banco.mesmaCliente(registro, cliente);
       });
 
       painel.innerHTML = contratos.length
@@ -1047,7 +1155,7 @@
               '<span class="badge ' + (registro.assinado ? 'badge-ok' : 'badge-warn') + '">' +
               (registro.assinado ? 'Assinado' : 'Pendente') + '</span>' +
               '<button type="button" class="btn btn-ghost btn-sm" data-acao="contrato-cliente"' +
-              ' data-servico="' + esc(registro.servico) + '">' +
+              ' data-contrato-id="' + esc(registro.id) + '" data-servico="' + esc(registro.servico) + '">' +
               (registro.assinado ? 'Ver contrato' : 'Assinar contrato') + '</button>' +
               '</div>';
           }).join('') + '</div>'
@@ -1196,7 +1304,7 @@
       var badge = document.querySelector('.ficha-side .badge');
       if (badge) {
         badge.textContent = cliente.gestacao ? 'Gestante' : (cliente.status || 'Ativa');
-        badge.className = 'badge ' + (cliente.status === 'Pendente' ? 'badge-warn' : 'badge-ok');
+        badge.className = 'badge ' + (cliente.status === 'Pendente' ? 'badge-warn' : (cliente.status === 'Inativa' ? 'badge-off' : 'badge-ok'));
       }
 
       // Coluna esquerda (lista de contato)
@@ -1228,8 +1336,8 @@
       renderizarDocumentos();
 
       try {
-        var url = urlFicha(cliente.nome);
-        if (window.location.search !== '?cliente=' + encodeURIComponent(cliente.nome)) {
+        var url = urlFicha(cliente);
+        if (window.location.search !== '?cliente=' + encodeURIComponent(cliente.id)) {
           window.history.replaceState({}, '', url);
         }
       } catch (erro) { /* histórico indisponível: segue sem atualizar a URL */ }
@@ -1254,11 +1362,10 @@
         var registro = null;
 
         carregarContratos().forEach(function (item) {
-          if (normalizar(item.cliente) === normalizar(cliente.nome) &&
-              normalizar(item.servico) === normalizar(servico)) registro = item;
+          if (String(item.id) === String(contrato.dataset.contratoId)) registro = item;
         });
 
-        abrirMinuta(cliente.nome, servico, registro ? registro.assinado : false, renderizarContratos);
+        abrirMinuta(cliente.nome, servico, registro ? registro.assinado : false, renderizarContratos, registro);
       }
     });
 
@@ -1331,14 +1438,12 @@
     var chipRow = document.querySelector('.main .chip-row');
     if (!chipRow) return;
 
-    // O atendimento é da cliente indicada em ?cliente= (padrão: primeiro cadastro).
+    // O atendimento é da cliente indicada em ?cliente=. Sem ela, nunca registra em outra por engano.
     var lista = carregarClientes();
-    var parametros = new URLSearchParams(window.location.search);
-    var pedido = parametros.get('cliente');
-    var cliente = pedido ? acharClientePorNome(lista, pedido) : null;
-    if (!cliente) cliente = lista[0];
+    var cliente = clienteDaUrl(lista).cliente;
+    if (!cliente) { irPara('clientes.html?escolha=1'); return; }
 
-    var destinoFicha = cliente ? urlFicha(cliente.nome) : 'ficha-cliente.html';
+    var destinoFicha = urlFicha(cliente);
 
     function definirResumo(coluna, texto) {
       if (!coluna) return;
@@ -1467,7 +1572,7 @@
   ];
 
   /** Abre a minuta do contrato. `aoAssinar` roda depois de gravar a assinatura. */
-  function abrirMinuta(nome, servico, assinado, aoAssinar) {
+  function abrirMinuta(nome, servico, assinado, aoAssinar, contrato) {
     var corpo = CLAUSULAS.map(function (paragrafo) {
       return '<p class="small" style="margin:0 0 10px;">' + esc(
         paragrafo.replace('{nome}', nome).replace('{servico}', servico)
@@ -1483,7 +1588,7 @@
         rotulo: 'Marcar como assinado', variante: 'primary',
         aoClicar: async function () {
           try {
-            await marcarContratoAssinado(nome, servico);
+            await marcarContratoAssinado(nome, servico, contrato);
             fecharGenerico();
             if (typeof aoAssinar === 'function') aoAssinar();
             toast('Contrato de ' + nome + ' marcado como assinado.');
@@ -1503,15 +1608,17 @@
   }
 
   function abrirContrato(linha) {
-    var cliente = linha.cells[0].textContent.trim();
-    var servico = linha.cells[1].textContent.trim();
+    // O contrato é identificado pelo id da linha (nome + serviço podem se repetir entre clientes).
+    var contrato = Banco.contratos.filter(function (c) { return String(c.id) === String(linha.dataset.contratoId); })[0];
+    var cliente = contrato ? contrato.cliente : linha.cells[0].textContent.trim();
+    var servico = contrato ? contrato.servico : linha.cells[1].textContent.trim();
     var badge = linha.querySelector('.badge');
-    var assinado = badge && normalizar(badge.textContent) === 'assinado';
+    var assinado = contrato ? !!contrato.assinado : (badge && normalizar(badge.textContent) === 'assinado');
 
     abrirMinuta(cliente, servico, assinado, function () {
       aplicarStatusContrato(linha, true);
       sincronizarTotaisContratos();
-    });
+    }, contrato);
   }
 
   function aplicarStatusContrato(linha, assinado) {
@@ -1534,8 +1641,9 @@
   }
 
   /** Assina o contrato no banco (ou cria o registro, se ainda não existir). */
-  async function marcarContratoAssinado(nome, servico) {
-    var contrato = acharContrato(nome, servico);
+  async function marcarContratoAssinado(nome, servico, contratoConhecido) {
+    // Com o contrato em mãos (id), não procura por nome: evita assinar o de uma homônima.
+    var contrato = contratoConhecido || acharContrato(nome, servico);
 
     if (contrato) {
       await Banco.assinarContrato(contrato);
@@ -1587,7 +1695,7 @@
     function renderTabela() {
       tabela.tBodies[0].innerHTML = Banco.contratos.map(function (contrato) {
         var assinado = !!contrato.assinado;
-        return '<tr>' +
+        return '<tr data-contrato-id="' + esc(contrato.id) + '">' +
           '<td class="name">' + esc(contrato.cliente) + '</td>' +
           '<td>' + esc(contrato.servico) + '</td>' +
           '<td><span class="badge ' + (assinado ? 'badge-ok' : 'badge-warn') + '">' +
@@ -1622,8 +1730,8 @@
         modalGenerico({
           titulo: 'Novo contrato',
           subtitulo: 'O contrato começa como pendente, aguardando assinatura',
-          html: campoHTML({ nome: 'cliente', label: 'Cliente', valor: clientes[0].nome,
-                            opcoes: clientes.map(function (c) { return c.nome; }) }) +
+          html: campoHTML({ nome: 'cliente', label: 'Cliente', valor: String(clientes[0].id),
+                            opcoes: opcoesDeClientes(clientes) }) +
                 campoHTML({ nome: 'servico', label: 'Serviço', valor: servicos[0], opcoes: servicos }),
           acoes: [
             { rotulo: 'Cancelar' },
@@ -1631,10 +1739,10 @@
               rotulo: 'Criar contrato', variante: 'primary',
               aoClicar: async function (ctx) {
                 var dados = lerCampos(ctx.corpo);
-                var cliente = acharClientePorNome(Banco.clientes, dados.cliente);
+                var cliente = acharClientePorId(Banco.clientes, dados.cliente);
                 var servico = Banco.servicoPorNome(dados.servico);
                 if (!cliente || !servico) { toast('Escolha a cliente e o serviço.'); return; }
-                if (acharContrato(cliente.nome, servico.nome)) {
+                if (Banco.contratoDoCliente(cliente, servico.nome)) {
                   toast(cliente.nome + ' já tem contrato de ' + servico.nome + '.');
                   return;
                 }
@@ -1706,7 +1814,7 @@
     }
 
     function ligarLinha(linha, pendencia) {
-      linha.dataset.destino = urlFicha(pendencia.cliente);
+      linha.dataset.destino = urlFicha(pendencia.cliente_id != null ? pendencia.cliente_id : pendencia.cliente);
       linha.addEventListener('click', function () { irPara(linha.dataset.destino); });
 
       var botao = linha.querySelector('[data-acao="acoes-pendencia"]');
@@ -1776,8 +1884,8 @@
         modalGenerico({
           titulo: 'Nova pendência',
           subtitulo: 'Registre o que precisa de atenção',
-          html: campoHTML({ nome: 'cliente', label: 'Cliente', valor: clientes[0].nome,
-                            opcoes: clientes.map(function (c) { return c.nome; }) }) +
+          html: campoHTML({ nome: 'cliente', label: 'Cliente', valor: String(clientes[0].id),
+                            opcoes: opcoesDeClientes(clientes) }) +
                 campoHTML({ nome: 'tipo', label: 'Tipo', valor: ROTULO_TIPO.outro, opcoes: rotulos }) +
                 campoHTML({ nome: 'descricao', label: 'Descrição', linha: 2 }),
           acoes: [
@@ -1786,7 +1894,7 @@
               rotulo: 'Salvar', variante: 'primary',
               aoClicar: async function (ctx) {
                 var dados = lerCampos(ctx.corpo);
-                var cliente = clientes.filter(function (c) { return c.nome === dados.cliente; })[0];
+                var cliente = acharClientePorId(clientes, dados.cliente);
                 var tipo = Object.keys(ROTULO_TIPO).filter(function (k) { return ROTULO_TIPO[k] === dados.tipo; })[0] || 'outro';
                 if (!cliente || !dados.descricao) { toast('Preencha a descrição da pendência.'); return; }
                 try {
@@ -1814,21 +1922,63 @@
     var select = document.getElementById('periodo');
     if (!select) return;
 
-    var dados = {
-      'Últimos 30 dias': ['38', '06', '04'],
-      'Últimos 6 meses': ['142', '21', '07'],
-      'Este ano': ['216', '34', '09']
-    };
+    var CHAVES = { 'Últimos 30 dias': '30d', 'Últimos 6 meses': '6m', 'Este ano': 'ano' };
 
-    select.addEventListener('change', function () {
-      var valores = dados[select.value];
-      if (!valores) return;
-      var cartoes = document.querySelectorAll('.dashboard-stats h2');
-      for (var i = 0; i < cartoes.length && i < valores.length; i++) {
-        cartoes[i].textContent = valores[i];
+    function barra(rotulo, total, maximo) {
+      var largura = maximo ? Math.max(4, Math.round(total * 100 / maximo)) : 0;
+      return '<div style="display:grid; grid-template-columns:minmax(90px,150px) 1fr 32px; align-items:center; gap:12px;">' +
+        '<span class="small">' + esc(rotulo) + '</span>' +
+        '<div style="background:var(--line); border-radius:6px; height:12px;"><div style="width:' + largura +
+        '%; background:var(--brown-500); height:100%; border-radius:6px;"></div></div>' +
+        '<b class="small">' + total + '</b></div>';
+    }
+
+    function desenhar() {
+      var r = Banco.relatorio(CHAVES[select.value] || '30d');
+
+      document.getElementById('relAtend').textContent = pad(r.atendimentos);
+      document.getElementById('relNovas').textContent = pad(r.novasClientes);
+      document.getElementById('relPend').textContent = pad(r.pendencias);
+
+      var maxServico = r.servicos.length ? r.servicos[0].total : 0;
+      document.getElementById('relServicos').innerHTML = r.servicos.length
+        ? r.servicos.map(function (x) { return barra(x.nome, x.total, maxServico); }).join('')
+        : '<p class="small muted">Nenhum atendimento registrado neste período.</p>';
+
+      var maxMes = Math.max.apply(null, r.meses.map(function (m) { return m.total; }).concat([1]));
+      document.getElementById('relMeses').innerHTML = r.meses.map(function (m) {
+        var altura = m.total ? Math.max(6, Math.round(m.total * 120 / maxMes)) : 2;
+        return '<div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:6px;">' +
+          '<b class="small">' + m.total + '</b>' +
+          '<div style="width:100%; max-width:36px; height:' + altura + 'px; background:var(--brown-500); border-radius:6px 6px 0 0;"></div>' +
+          '<span class="small muted">' + esc(capitalizar(m.rotulo)) + '</span></div>';
+      }).join('');
+
+      document.getElementById('relTabela').innerHTML = r.servicos.length
+        ? r.servicos.map(function (x) {
+            return '<tr><td class="name">' + esc(x.nome) + '</td><td>' + x.total + '</td><td>' +
+              Math.round(x.total * 100 / r.atendimentos) + '%</td></tr>';
+          }).join('')
+        : '<tr><td colspan="3" class="muted">Sem atendimentos no período.</td></tr>';
+
+      // Resumo montado só com os números acima (nada inventado).
+      var linhas = [];
+      if (!r.atendimentos) {
+        linhas.push('Nenhum atendimento registrado em ' + select.value.toLowerCase() + '.');
+      } else {
+        var topo = r.servicos[0];
+        linhas.push(topo.nome + ' foi o serviço mais atendido: ' + topo.total + ' de ' + r.atendimentos +
+          ' (' + Math.round(topo.total * 100 / r.atendimentos) + '%).');
+        var melhorMes = r.meses.slice().sort(function (a, b) { return b.total - a.total; })[0];
+        if (melhorMes.total) linhas.push('Nos últimos 6 meses, ' + capitalizar(melhorMes.rotulo) + ' teve o maior movimento (' + melhorMes.total + ' atendimentos).');
       }
-      toast('Período: ' + select.value + ' (dados de demonstração).');
-    });
+      linhas.push((r.novasClientes === 0 ? 'Nenhuma cliente nova' : r.novasClientes + (r.novasClientes === 1 ? ' cliente nova cadastrada' : ' clientes novas cadastradas')) + ' no período.');
+      linhas.push(r.pendencias + (r.pendencias === 1 ? ' pendência aberta' : ' pendências abertas') + ' agora.');
+      document.getElementById('relAiOutput').innerHTML = linhas.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('');
+    }
+
+    select.addEventListener('change', desenhar);
+    desenhar();
   }
 
   /* -------------------------------- 14. Agenda ---------------------------- */
@@ -1857,8 +2007,8 @@
     var seletorCliente = document.getElementById('clienteAgendamento');
     if (seletorCliente) {
       seletorCliente.innerHTML = '<option value="">Selecione a cliente</option>' +
-        carregarClientes().map(function (cadastro) {
-          return '<option value="' + esc(cadastro.nome) + '">' + esc(cadastro.nome) + '</option>';
+        opcoesDeClientes(carregarClientes()).map(function (opcao) {
+          return '<option value="' + esc(opcao.valor) + '">' + esc(opcao.rotulo) + '</option>';
         }).join('');
     }
 
@@ -2152,23 +2302,25 @@
       formulario.addEventListener('submit', async function (evento) {
         evento.preventDefault();
 
-        var cliente = document.getElementById('clienteAgendamento').value;
+        var clienteId = document.getElementById('clienteAgendamento').value;
         var data = document.getElementById('dataAgendamento').value;
         var hora = document.getElementById('horaAgendamento').value;
         var servico = document.getElementById('servicoAgendamento').value;
         var observacao = document.getElementById('observacaoAgendamento').value;
 
-        if (!cliente || !data || !hora || !servico) {
+        if (!clienteId || !data || !hora || !servico) {
           toast('Preencha cliente, data, horário e serviço.');
           return;
         }
 
-        var cadastro = acharClientePorNome(Banco.clientes, cliente);
+        var cadastro = acharClientePorId(Banco.clientes, clienteId);
+        if (!cadastro) { toast('Escolha uma cliente da lista.'); return; }
+        var cliente = cadastro.nome;
         var servicoBanco = Banco.servicoPorNome(servico);
 
         try {
           await Banco.criarAgendamento({
-            cliente_id: cadastro ? cadastro.id : null,
+            cliente_id: cadastro.id,
             cliente: cliente,
             servico_id: servicoBanco ? servicoBanco.id : null,
             servico: servico,
@@ -2207,6 +2359,11 @@
       var email = (document.getElementById('loginEmail') || {}).value || '';
       var senha = (document.getElementById('loginSenha') || {}).value || '';
 
+      // A API pode ter sido ligada depois que a página abriu: tenta de novo antes de desistir.
+      if (Banco.modo !== 'api') {
+        try { await Banco.carregar(); } catch (erro) { /* segue para o aviso abaixo */ }
+      }
+
       if (Banco.modo === 'api') {
         try {
           var usuario = await Banco.pedir('/auth/login', {
@@ -2215,15 +2372,205 @@
           });
           Banco.guardarSessao(usuario);
           toast('Bem-vinda, ' + usuario.nome + '.');
-          window.setTimeout(function () { irPara('dashboard.html'); }, 400);
+          var destino = usuario.precisa_trocar_senha ? 'configuracoes.html?obrigatorio=1' : 'dashboard.html';
+          window.setTimeout(function () { irPara(destino); }, 400);
         } catch (erro) {
           toast(erro.message || 'Não foi possível entrar.');
         }
         return;
       }
 
-      // Sem servidor: entra direto, como na versão de interface.
-      irPara('dashboard.html');
+      // Sem a API não há como conferir a senha: ninguém entra.
+      toast('Servidor indisponível. Ligue a API (npm start na pasta server) e tente de novo.');
+    });
+  }
+
+  /* ------------------- Recuperação de senha (por e-mail) ------------------ */
+
+  function iniciarEsqueciSenha() {
+    var formulario = document.getElementById('formEsqueciSenha');
+    if (!formulario) return;
+
+    var ESPERA_SEGUNDOS = 60;   // só dá para reenviar depois de 1 minuto
+    var MAX_ENVIOS = 3;         // mesmo limite da API (3 a cada 15 minutos)
+
+    var mensagem = document.getElementById('esqueciMensagem');
+    var botao = document.getElementById('btnEsqueci');
+    var campoEmail = document.getElementById('esqueciEmail');
+    var telaEnviado = document.getElementById('esqueciEnviado');
+    var contagem = document.getElementById('esqueciContagem');
+    var botaoReenviar = document.getElementById('btnReenviar');
+    var temporizador = null;
+    var envios = 0;
+    var emailAtual = '';
+
+    function dois(n) { return (n < 10 ? '0' : '') + n; }
+
+    /** Cronômetro visível; ao zerar, libera o botão de reenviar. */
+    function iniciarContagem() {
+      var termina = Date.now() + ESPERA_SEGUNDOS * 1000;
+      botaoReenviar.disabled = true;
+      window.clearInterval(temporizador);
+
+      function atualizar() {
+        var restante = Math.max(0, Math.ceil((termina - Date.now()) / 1000));
+        if (restante > 0) {
+          contagem.innerHTML = 'Você poderá reenviar em <strong>' + dois(Math.floor(restante / 60)) + ':' + dois(restante % 60) + '</strong>';
+          return;
+        }
+        window.clearInterval(temporizador);
+        if (envios >= MAX_ENVIOS) {
+          contagem.textContent = 'Você já pediu o envio ' + MAX_ENVIOS + ' vezes. Aguarde cerca de 15 minutos para tentar de novo.';
+          return;
+        }
+        contagem.textContent = 'Agora você já pode reenviar.';
+        botaoReenviar.disabled = false;
+      }
+
+      atualizar();
+      temporizador = window.setInterval(atualizar, 250);
+    }
+
+    async function pedir(email) {
+      // A API pode ter sido ligada depois que a página abriu.
+      if (Banco.modo !== 'api') {
+        try { await Banco.carregar(); } catch (erro) { /* segue para o aviso */ }
+      }
+      await Banco.esqueciSenha(email);
+      envios += 1;
+    }
+
+    formulario.addEventListener('submit', async function (evento) {
+      evento.preventDefault();
+      mensagem.textContent = '';
+      mensagem.style.color = 'var(--ink-muted)';
+
+      var email = campoEmail.value.trim();
+      botao.disabled = true;
+      botao.textContent = 'Enviando...';
+
+      try {
+        envios = 0;
+        await pedir(email);
+        emailAtual = email;
+        document.getElementById('esqueciEnviadoPara').textContent = email;
+        formulario.style.display = 'none';
+        telaEnviado.style.display = 'block';
+        toast('E-mail enviado para ' + email + '.');
+        iniciarContagem();
+      } catch (falha) {
+        mensagem.style.color = 'var(--warn-tx)';
+        mensagem.textContent = falha.message || 'Não foi possível enviar agora.';
+      } finally {
+        botao.disabled = false;
+        botao.textContent = 'Enviar link';
+      }
+    });
+
+    botaoReenviar.addEventListener('click', async function () {
+      botaoReenviar.disabled = true;
+      botaoReenviar.textContent = 'Enviando...';
+      try {
+        await pedir(emailAtual);
+        toast('E-mail reenviado para ' + emailAtual + '.');
+        iniciarContagem();
+      } catch (falha) {
+        contagem.textContent = falha.message || 'Não foi possível reenviar agora.';
+        botaoReenviar.disabled = false;
+      } finally {
+        botaoReenviar.textContent = 'Reenviar e-mail';
+      }
+    });
+
+    document.getElementById('esqueciOutroEmail').addEventListener('click', function (evento) {
+      evento.preventDefault();
+      window.clearInterval(temporizador);
+      telaEnviado.style.display = 'none';
+      formulario.style.display = 'block';
+      campoEmail.focus();
+    });
+  }
+
+  function iniciarRedefinirSenha() {
+    var formulario = document.getElementById('formRedefinirSenha');
+    if (!formulario) return;
+
+    var token = new URLSearchParams(window.location.search).get('token') || '';
+    var campos = document.getElementById('redefinirCampos');
+    var aviso = document.getElementById('redefinirInvalido');
+    var erro = document.getElementById('redefinirErro');
+    var botao = document.getElementById('btnRedefinir');
+
+    function linkInvalido() {
+      aviso.style.display = 'block';
+      campos.style.display = 'none';
+    }
+
+    if (!token) { linkInvalido(); return; }
+
+    formulario.addEventListener('submit', async function (evento) {
+      evento.preventDefault();
+      erro.textContent = '';
+
+      var nova = document.getElementById('redefinirNova').value;
+      var confirmacao = document.getElementById('redefinirConfirma').value;
+      if (nova !== confirmacao) { erro.textContent = 'As duas senhas não são iguais.'; return; }
+      if (nova.length < 8) { erro.textContent = 'A senha precisa ter pelo menos 8 caracteres.'; return; }
+
+      if (Banco.modo !== 'api') {
+        try { await Banco.carregar(); } catch (falhaCarga) { /* segue para o aviso */ }
+      }
+
+      botao.disabled = true;
+      try {
+        await Banco.redefinirSenha(token, nova);
+        toast('Senha alterada. Entre com a nova senha.');
+        window.setTimeout(function () { irPara('login.html'); }, 1500);
+      } catch (falha) {
+        if (/não é mais válido/.test(falha.message || '')) { linkInvalido(); }
+        else { erro.textContent = falha.message || 'Não foi possível salvar a senha.'; botao.disabled = false; }
+      }
+    });
+  }
+
+  /* ------------------------- Configurações (conta e senha) ---------------- */
+
+  function iniciarConfiguracoes() {
+    var formulario = document.getElementById('formTrocarSenha');
+    if (!formulario) return;
+
+    var sessao = Banco.usuario() || {};
+    document.getElementById('contaNome').textContent = sessao.nome || '—';
+    document.getElementById('contaEmail').textContent = sessao.email || '—';
+
+    var obrigatorio = /[?&]obrigatorio=1/.test(window.location.search);
+    if (obrigatorio) document.getElementById('avisoSenhaObrigatoria').style.display = 'block';
+
+    var erro = document.getElementById('erroSenha');
+    var botao = document.getElementById('btnTrocarSenha');
+
+    formulario.addEventListener('submit', async function (evento) {
+      evento.preventDefault();
+      erro.textContent = '';
+
+      var atual = document.getElementById('senhaAtual').value;
+      var nova = document.getElementById('senhaNova').value;
+      var confirmacao = document.getElementById('senhaConfirma').value;
+
+      if (nova !== confirmacao) { erro.textContent = 'As duas novas senhas não são iguais.'; return; }
+      if (nova.length < 8) { erro.textContent = 'A nova senha precisa ter pelo menos 8 caracteres.'; return; }
+
+      botao.disabled = true;
+      try {
+        await Banco.trocarSenha(atual, nova);
+        formulario.reset();
+        toast('Senha alterada com sucesso.');
+        if (obrigatorio) window.setTimeout(function () { irPara('dashboard.html'); }, 800);
+      } catch (falha) {
+        erro.textContent = falha.message || 'Não foi possível trocar a senha.';
+      } finally {
+        botao.disabled = false;
+      }
     });
   }
 
@@ -2414,6 +2761,9 @@
     iniciarDashboard();
     iniciarLembretes();
     iniciarLogin();
+    iniciarEsqueciSenha();
+    iniciarRedefinirSenha();
+    iniciarConfiguracoes();
     iniciarSair();
   });
 })();

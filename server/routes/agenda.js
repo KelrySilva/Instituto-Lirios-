@@ -86,6 +86,19 @@ router.get('/hoje', rota(async (req, res) => {
   res.json(linhas);
 }));
 
+/** Recusa (409) se já houver consulta marcada que se sobreponha a [inicio, inicio + duracao). */
+async function garantirHorarioLivre(inicio, duracao, ignorarId) {
+  const [choques] = await pool.execute(
+    `SELECT id FROM agendamentos
+      WHERE id <> ? AND status = 'agendado'
+        AND inicio < DATE_ADD(?, INTERVAL ? MINUTE)
+        AND DATE_ADD(inicio, INTERVAL duracao_min MINUTE) > ?
+      LIMIT 1`,
+    [ignorarId || 0, inicio, duracao, inicio]
+  );
+  if (choques.length) throw new HttpError(409, 'Já existe uma consulta nesse horário.');
+}
+
 // POST /api/agenda
 router.post('/', rota(async (req, res) => {
   const corpo = req.body || {};
@@ -101,6 +114,9 @@ router.post('/', rota(async (req, res) => {
     duracao = servico[0].duracao_min;
   }
 
+  const statusNovo = opcao(corpo.status, 'status', STATUS, 'agendado');
+  if (statusNovo === 'agendado') await garantirHorarioLivre(inicio, duracao, 0);
+
   const [resultado] = await pool.execute(
     `INSERT INTO agendamentos
        (cliente_id, servico_id, profissional_id, inicio, duracao_min, status, observacao)
@@ -111,7 +127,7 @@ router.post('/', rota(async (req, res) => {
       corpo.profissional_id ? id(corpo.profissional_id, 'profissional_id') : null,
       inicio,
       duracao,
-      opcao(corpo.status, 'status', STATUS, 'agendado'),
+      statusNovo,
       texto(corpo.observacao, 'observacao', { obrigatorio: false, max: 255 })
     ]
   );
@@ -131,17 +147,10 @@ router.put('/:id', rota(async (req, res) => {
     : atual.duracao_min;
   const novoStatus = opcao(corpo.status, 'status', STATUS, atual.status);
 
-  // Reagendar: não pode cair em cima de outra consulta marcada.
-  if (('inicio' in corpo || 'duracao_min' in corpo) && novoStatus === 'agendado') {
-    const [choques] = await pool.execute(
-      `SELECT id FROM agendamentos
-        WHERE id <> ? AND status = 'agendado'
-          AND inicio < DATE_ADD(?, INTERVAL ? MINUTE)
-          AND DATE_ADD(inicio, INTERVAL duracao_min MINUTE) > ?
-        LIMIT 1`,
-      [idAgendamento, novoInicio, novaDuracao, novoInicio]
-    );
-    if (choques.length) throw new HttpError(409, 'Já existe uma consulta nesse horário.');
+  // Reagendar (ou reativar): não pode cair em cima de outra consulta marcada.
+  if (novoStatus === 'agendado' &&
+      ('inicio' in corpo || 'duracao_min' in corpo || atual.status !== 'agendado')) {
+    await garantirHorarioLivre(novoInicio, novaDuracao, idAgendamento);
   }
 
   await pool.execute(

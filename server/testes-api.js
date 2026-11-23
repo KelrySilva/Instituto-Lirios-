@@ -16,12 +16,16 @@
 const assert = require('node:assert');
 process.env.AUTH_SECRET = 'segredo-de-teste-com-mais-de-16-caracteres';
 const db = require('./db');
-const { criarToken, verificarToken } = require('./auth-token');
+const { criarToken, verificarToken, criarTokenRedefinicao, verificarTokenRedefinicao } = require('./auth-token');
+const emailMod = require('./email');
+const limite = require('./limite');
+const { validarNovaSenha, ehSenhaPadrao } = require('./senha');
 
 let sqls = [];
 
 const bcrypt = require('bcryptjs');
 const HASH_TESTE = bcrypt.hashSync('certa123', 4);
+const HASH_PADRAO = bcrypt.hashSync('senha1234', 4);
 
 // Estado controlado pelos testes da regra de pendência de contrato.
 const FAKE = { pendentes: 0, pendenciaAberta: false, conflito: false };
@@ -44,6 +48,12 @@ function respostaFalsa(sql, params) {
 
   if (texto.includes('FROM USUARIOS')) {
     const email = params && params[0];
+    if (typeof email === 'number') { // busca por id (troca de senha)
+      return [{ id: email, nome: 'Dra. Teste', email: 'existe@teste.com', senha_hash: HASH_TESTE, perfil: 'admin', ativo: 1 }];
+    }
+    if (email === 'padrao@teste.com') {
+      return [{ id: 3, nome: 'Dra. Padrão', email, senha_hash: HASH_PADRAO, perfil: 'admin', ativo: 1 }];
+    }
     if (email === 'existe@teste.com') {
       return [{ id: 1, nome: 'Dra. Teste', email, senha_hash: HASH_TESTE, perfil: 'admin', ativo: 1 }];
     }
@@ -165,6 +175,129 @@ async function executar() {
   r = await pedir('POST', '/api/auth/login', {}, true);
   ok(r.status === 400, 'login continua público (sem token, responde 400 por faltar dados)', r.status);
 
+  console.log('\n[1c] Troca de senha e senha de demonstração');
+  const tokenNormal = tokenDeTeste;
+  r = await pedir('POST', '/api/auth/login', { email: 'existe@teste.com', senha: 'certa123' }, true);
+  ok(r.status === 200 && r.corpo.precisa_trocar_senha === false && !verificarToken(r.corpo.token).tr,
+    'login com senha própria não exige troca', r.status);
+
+  r = await pedir('POST', '/api/auth/login', { email: 'padrao@teste.com', senha: 'senha1234' }, true);
+  ok(r.status === 200 && r.corpo.precisa_trocar_senha === true && verificarToken(r.corpo.token).tr === 1,
+    'login com a senha de demonstração marca "precisa trocar senha"', r);
+  const tokenPadrao = r.corpo.token;
+
+  tokenDeTeste = tokenPadrao;
+  r = await pedir('GET', '/api/clientes');
+  ok(r.status === 403 && r.corpo.detalhes === 'TROCAR_SENHA', 'com senha de demonstração, as outras rotas dão 403 (TROCAR_SENHA)', r);
+  r = await pedir('GET', '/api/health');
+  ok(r.status === 200, 'a rota de saúde continua livre', r.status);
+
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'errada99', nova_senha: 'Nova@senha9' });
+  ok(r.status === 400 && /atual/.test(r.corpo.erro), 'senha atual errada é recusada (400, sem deslogar)', r);
+
+  tokenDeTeste = criarToken({ id: 1, nome: 'Dra. Teste', email: 'existe@teste.com', perfil: 'admin', trocar: true });
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'certa123', nova_senha: 'curta1' });
+  ok(r.status === 400 && /8 caracteres/.test(r.corpo.erro), 'senha curta é recusada', r);
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'certa123', nova_senha: 'somenteletras' });
+  ok(r.status === 400 && /letras e números/.test(r.corpo.erro), 'senha sem número é recusada', r);
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'certa123', nova_senha: 'senha1234' });
+  ok(r.status === 400 && /comum/.test(r.corpo.erro), 'a senha de demonstração não pode ser a nova senha', r);
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'certa123', nova_senha: 'certa123' });
+  ok(r.status === 400 && /diferente/.test(r.corpo.erro), 'nova senha igual à atual é recusada', r);
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'certa123' });
+  ok(r.status === 400, 'sem nova senha devolve 400', r.status);
+
+  const antesTroca = sqls.length;
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'certa123', nova_senha: 'Nova@senha9' });
+  const gravou = sqls.slice(antesTroca).filter((q) => /UPDATE usuarios SET senha_hash/i.test(q));
+  ok(r.status === 200 && gravou.length === 1, 'troca válida grava o novo hash no banco', r);
+  ok(r.corpo.precisa_trocar_senha === false && verificarToken(r.corpo.token) && !verificarToken(r.corpo.token).tr,
+    'a troca devolve um token novo, sem a marca de senha de demonstração');
+  tokenDeTeste = r.corpo.token;
+  r = await pedir('GET', '/api/clientes');
+  ok(r.status === 200, 'com o token novo as rotas voltam a funcionar', r.status);
+
+  r = await pedir('POST', '/api/auth/trocar-senha', { senha_atual: 'x', nova_senha: 'y' }, true);
+  ok(r.status === 401, 'trocar senha exige estar logado (401 sem token)', r.status);
+  tokenDeTeste = tokenNormal;
+
+  ok(ehSenhaPadrao('senha1234') && ehSenhaPadrao(' Senha1234 ') && !ehSenhaPadrao('outra1234'), 'ehSenhaPadrao reconhece a senha publicada');
+  ok(validarNovaSenha('Boa#Senha2026', { email: 'a@b.com' }) === null, 'validarNovaSenha aceita uma senha boa');
+  ok(validarNovaSenha('x'.repeat(73) + '1') !== null, 'validarNovaSenha recusa senha acima de 72 caracteres (limite do bcrypt)');
+
+  console.log('\n[1c2] Recuperação de senha por e-mail');
+  const enviados = [];
+  emailMod.definirTransporte({ sendMail: async (m) => { enviados.push(m); } });
+  process.env.APP_URL = 'https://sistema.exemplo.com.br/';
+  const esperar = () => new Promise((resolver) => setTimeout(resolver, 40));
+  const SEM = true;
+  const sqlAntes = sqls.length;
+
+  r = await pedir('POST', '/api/auth/esqueci-senha', { email: 'existe@teste.com' }, SEM);
+  await esperar();
+  ok(r.status === 200 && r.corpo.ok === true, 'pedir recuperação devolve 200 sem exigir login', r);
+  ok(enviados.length === 1 && enviados[0].to === 'existe@teste.com', 'e-mail cadastrado recebe a mensagem');
+  const linkEnviado = (/https?:\/\/\S+/.exec(enviados[0].text) || [''])[0];
+  ok(linkEnviado.startsWith('https://sistema.exemplo.com.br/redefinir-senha.html?token='),
+    'o link usa o APP_URL do .env (e não algo vindo do pedido)', linkEnviado);
+  ok(/30 minutos/.test(enviados[0].text) && /ignorar esta mensagem/.test(enviados[0].text), 'mensagem explica validade e o que fazer se não foi a pessoa');
+  const tokenDoEmail = decodeURIComponent(linkEnviado.split('token=')[1]);
+
+  const respostaConhecida = r.corpo.mensagem;
+  r = await pedir('POST', '/api/auth/esqueci-senha', { email: 'ninguem@teste.com' }, SEM);
+  await esperar();
+  ok(r.status === 200 && r.corpo.mensagem === respostaConhecida && enviados.length === 1,
+    'e-mail desconhecido recebe a MESMA resposta e nada é enviado (não revela quem é cadastrado)');
+  r = await pedir('POST', '/api/auth/esqueci-senha', { email: 'inativo@teste.com' }, SEM);
+  await esperar();
+  ok(r.status === 200 && enviados.length === 1, 'usuário inativo não recebe link');
+  r = await pedir('POST', '/api/auth/esqueci-senha', {}, SEM);
+  ok(r.status === 400, 'sem e-mail devolve 400', r.status);
+
+  r = await pedir('POST', '/api/auth/esqueci-senha', { email: 'existe@teste.com', origem: 'https://golpe.com' }, SEM);
+  r = await pedir('POST', '/api/auth/esqueci-senha', { email: 'existe@teste.com' }, SEM);
+  r = await pedir('POST', '/api/auth/esqueci-senha', { email: 'existe@teste.com' }, SEM);
+  await esperar();
+  ok(r.status === 200 && enviados.length === 3, 'no máximo 3 e-mails por endereço a cada 15 minutos (o 4º pedido não envia nada)', enviados.length);
+  limite.zerar();
+
+  ok(verificarTokenRedefinicao(tokenDoEmail) !== null, 'o token do e-mail é autêntico');
+  ok(verificarToken(tokenDoEmail) === null, 'o token do e-mail NÃO serve para entrar no sistema');
+  const tokenDeLogin = criarToken({ id: 1, nome: 'x', email: 'e@e.com', perfil: 'admin' });
+  ok(verificarTokenRedefinicao(tokenDeLogin) === null, 'um token de login NÃO serve para redefinir senha');
+  ok(verificarTokenRedefinicao(tokenDoEmail.slice(0, -2) + 'AA') === null, 'link adulterado é recusado');
+
+  const sqlDepoisUpdate = sqls.length;
+  r = await pedir('POST', '/api/auth/redefinir-senha', { token: tokenDoEmail, nova_senha: 'Nova#Senha2026' }, SEM);
+  ok(r.status === 200 && sqls.slice(sqlDepoisUpdate).some((q) => /UPDATE usuarios SET senha_hash/i.test(q)),
+    'link válido + senha boa grava a nova senha', r);
+  r = await pedir('POST', '/api/auth/redefinir-senha', { token: tokenDoEmail, nova_senha: 'curta1' }, SEM);
+  ok(r.status === 400 && /8 caracteres/.test(r.corpo.erro), 'senha fraca é recusada na redefinição', r);
+  r = await pedir('POST', '/api/auth/redefinir-senha', { token: 'lixo.lixo', nova_senha: 'Nova#Senha2026' }, SEM);
+  ok(r.status === 400 && /não é mais válido/.test(r.corpo.erro), 'link inventado devolve 400', r);
+  r = await pedir('POST', '/api/auth/redefinir-senha', { nova_senha: 'Nova#Senha2026' }, SEM);
+  ok(r.status === 400, 'sem link devolve 400', r.status);
+
+  // link de uma senha antiga (a senha mudou depois): não vale mais — uso único
+  const antigo = criarTokenRedefinicao({ id: 1, senha_hash: 'hash-que-nao-e-mais-o-atual' });
+  r = await pedir('POST', '/api/auth/redefinir-senha', { token: antigo, nova_senha: 'Nova#Senha2026' }, SEM);
+  ok(r.status === 400 && /não é mais válido/.test(r.corpo.erro), 'link já usado (senha mudou depois) deixa de valer', r);
+
+  // link vencido
+  const real = Date.now;
+  Date.now = () => real() + 31 * 60 * 1000;
+  r = await pedir('POST', '/api/auth/redefinir-senha', { token: tokenDoEmail, nova_senha: 'Nova#Senha2026' }, SEM);
+  Date.now = real;
+  ok(r.status === 400 && /não é mais válido/.test(r.corpo.erro), 'link vencido (mais de 30 minutos) é recusado', r);
+
+  // limite de tentativas de redefinição por origem
+  limite.zerar();
+  let ultimo = 0;
+  for (let i = 0; i < 22; i += 1) { ultimo = (await pedir('POST', '/api/auth/redefinir-senha', { token: 'x.y', nova_senha: 'Nova#Senha2026' }, SEM)).status; }
+  ok(ultimo === 429, 'muitas tentativas seguidas de redefinição devolvem 429', ultimo);
+  limite.zerar();
+  delete process.env.APP_URL;
+
   console.log('\n[1d] Pendências automáticas de contrato e tipo "pagamento" (RF18)');
   let antes = sqls.length;
   FAKE.pendentes = 1; FAKE.pendenciaAberta = false;
@@ -216,6 +349,19 @@ async function executar() {
 
   r = await pedir('PUT', '/api/agenda/1', { inicio: 'amanhã' });
   ok(r.status === 400, 'horário inválido continua sendo recusado', r.status);
+
+  console.log('\n[1e2] Novo agendamento não pode duplicar horário');
+  const novo = { cliente_id: 1, servico_id: 1, inicio: '2026-11-25 10:00', duracao_min: 60 };
+  FAKE.conflito = true;
+  r = await pedir('POST', '/api/agenda', novo);
+  ok(r.status === 409 && /nesse horário/.test(r.corpo.erro), 'agendar em cima de outra consulta devolve 409', r);
+  FAKE.conflito = false;
+  r = await pedir('POST', '/api/agenda', novo);
+  ok(r.status === 201, 'agendar em horário livre devolve 201', r.status);
+  FAKE.conflito = true;
+  r = await pedir('POST', '/api/agenda', Object.assign({}, novo, { status: 'cancelado' }));
+  ok(r.status === 201, 'registro já cancelado não conta como conflito', r.status);
+  FAKE.conflito = false;
 
   console.log('\n[1f] Documentos da cliente');
   const pdf64 = Buffer.from('%PDF-1.4 teste').toString('base64');
