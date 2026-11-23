@@ -76,7 +76,7 @@ function respostaFalsa(sql, params) {
       return [{
         id: 1, cliente_id: 1, nome: 'Cliente Teste', status: 'ativa',
         cliente: 'Cliente Teste', servico: 'Pré-natal', profissional: 'Dra. Katlhen',
-        total_exames: 0, data_atendimento: '2026-01-01', inicio: '2026-11-10 10:00:00',
+        total_exames: 0, data_atendimento: '2026-01-01', inicio: '2099-11-10 10:00:00',
         tipo_parto: 'a_definir', bebe_sexo: 'nao_informado', movimentacoes: 'ativas',
         duracao_min: 60, valor: 0, descricao: 'Teste', tipo: 'outro',
         dum: '2026-01-01', dpp: '2026-10-08', data_nascimento: '1995-05-15'
@@ -85,6 +85,7 @@ function respostaFalsa(sql, params) {
     return [];
   }
 
+  if (texto.startsWith('INSERT INTO CLIENTES')) FAKE.ultimoInsertClientes = JSON.stringify(params);
   if (texto.startsWith('INSERT')) return { insertId: 1, affectedRows: 1 };
   return { affectedRows: 1 };
 }
@@ -332,13 +333,13 @@ async function executar() {
   console.log('\n[1e] Reagendar consulta (RF08)');
   antes = sqls.length;
   FAKE.conflito = false;
-  r = await pedir('PUT', '/api/agenda/1', { inicio: '2026-11-20 14:00' });
+  r = await pedir('PUT', '/api/agenda/1', { inicio: '2099-11-20 14:00' });
   ok(r.status === 200, 'reagendar para um horário livre devolve 200', r.status);
   ok(sqls.slice(antes).some((q) => /DELETE FROM lembretes/i.test(q)),
     'reagendar apaga o lembrete antigo (ele é refeito com a data nova)');
 
   FAKE.conflito = true;
-  r = await pedir('PUT', '/api/agenda/1', { inicio: '2026-11-20 14:00', status: 'agendado' });
+  r = await pedir('PUT', '/api/agenda/1', { inicio: '2099-11-20 14:00', status: 'agendado' });
   ok(r.status === 409 && /nesse horário/.test(r.corpo.erro), 'reagendar em cima de outra consulta devolve 409', r);
 
   antes = sqls.length;
@@ -351,7 +352,7 @@ async function executar() {
   ok(r.status === 400, 'horário inválido continua sendo recusado', r.status);
 
   console.log('\n[1e2] Novo agendamento não pode duplicar horário');
-  const novo = { cliente_id: 1, servico_id: 1, inicio: '2026-11-25 10:00', duracao_min: 60 };
+  const novo = { cliente_id: 1, servico_id: 1, inicio: '2099-11-25 10:00', duracao_min: 60 };
   FAKE.conflito = true;
   r = await pedir('POST', '/api/agenda', novo);
   ok(r.status === 409 && /nesse horário/.test(r.corpo.erro), 'agendar em cima de outra consulta devolve 409', r);
@@ -362,6 +363,45 @@ async function executar() {
   r = await pedir('POST', '/api/agenda', Object.assign({}, novo, { status: 'cancelado' }));
   ok(r.status === 201, 'registro já cancelado não conta como conflito', r.status);
   FAKE.conflito = false;
+
+  console.log('\n[1e3] Agenda não aceita data passada');
+  r = await pedir('POST', '/api/agenda', { cliente_id: 1, servico_id: 1, inicio: '2020-01-10 10:00' });
+  ok(r.status === 400 && /já passou/.test(r.corpo.erro), 'agendar em data que já passou devolve 400', r);
+  r = await pedir('POST', '/api/agenda', { cliente_id: 1, servico_id: 1, inicio: '2020-01-10 10:00', status: 'concluido' });
+  ok(r.status === 201, 'registrar consulta antiga já concluída continua permitido', r.status);
+  r = await pedir('PUT', '/api/agenda/1', { inicio: '2020-01-10 10:00', status: 'agendado' });
+  ok(r.status === 400 && /já passou/.test(r.corpo.erro), 'reagendar para o passado devolve 400', r);
+  r = await pedir('PUT', '/api/agenda/1', { observacao: 'só uma nota' });
+  ok(r.status === 200, 'editar observação sem mudar o horário continua permitido', r.status);
+
+  console.log('\n[1e4] Campos de tamanho fixo: CPF, telefone, nascimento, e-mail');
+  const baseCampos = { nome: 'Teste Campos' };
+  const casos = [
+    [{ cpf: '123' }, 400, 'CPF curto'],
+    [{ cpf: '111.111.111-11' }, 400, 'CPF com todos os números iguais'],
+    [{ cpf: '529.982.247-26' }, 400, 'CPF com dígito verificador errado'],
+    [{ cpf: '529.982.247-25999' }, 400, 'CPF com números sobrando'],
+    [{ cpf: '52998224725' }, 201, 'CPF válido sem máscara'],
+    [{ telefone: '99999' }, 400, 'telefone curto'],
+    [{ telefone: '9'.repeat(40) }, 400, 'telefone gigante'],
+    [{ telefone: '(99) 89999-9999' }, 400, 'celular de 11 dígitos sem 9 depois do DDD'],
+    [{ telefone: '(99) 99999-9999' }, 201, 'celular válido'],
+    [{ telefone: '99 3333-4444' }, 201, 'fixo válido'],
+    [{ data_nascimento: '2999-01-01' }, 400, 'nascimento no futuro'],
+    [{ data_nascimento: '1850-01-01' }, 400, 'nascimento antes de 1900'],
+    [{ data_nascimento: '1990-05-20' }, 201, 'nascimento válido'],
+    [{ email: 'sem-arroba' }, 400, 'e-mail sem @'],
+    [{ email: 'a@b.com' }, 201, 'e-mail válido']
+  ];
+  for (const [campos, esperado, nome] of casos) {
+    r = await pedir('POST', '/api/clientes', Object.assign({}, baseCampos, campos));
+    ok(r.status === esperado, nome + ' -> ' + esperado, r.status + ' ' + JSON.stringify(r.corpo).slice(0, 90));
+  }
+  r = await pedir('POST', '/api/clientes', Object.assign({}, baseCampos, { cpf: '52998224725', telefone: '99999999999' }));
+  ok(r.status === 201 && FAKE.ultimoInsertClientes && FAKE.ultimoInsertClientes.includes('529.982.247-25') &&
+     FAKE.ultimoInsertClientes.includes('(99) 99999-9999'), 'CPF e telefone são gravados com máscara padrão', FAKE.ultimoInsertClientes);
+  r = await pedir('PATCH', '/api/clientes/1', { telefone: '123' });
+  ok(r.status === 400, 'alterar telefone para valor inválido devolve 400', r.status);
 
   console.log('\n[1f] Documentos da cliente');
   const pdf64 = Buffer.from('%PDF-1.4 teste').toString('base64');
@@ -439,7 +479,7 @@ async function executar() {
     ['PUT', '/api/contratos/1', { status: 'cancelado' }, 200],
     ['GET', '/api/agenda?de=2026-11-01&ate=2026-11-30', undefined, 200],
     ['GET', '/api/agenda/hoje', undefined, 200],
-    ['POST', '/api/agenda', { cliente_id: 1, servico_id: 1, inicio: '2026-11-10 10:00' }, 201],
+    ['POST', '/api/agenda', { cliente_id: 1, servico_id: 1, inicio: '2099-11-10 10:00' }, 201],
     ['PUT', '/api/agenda/1', { status: 'concluido' }, 200],
     ['PATCH', '/api/agenda/1/status', { status: 'faltou' }, 200],
     ['GET', '/api/pendencias?status=aberta', undefined, 200],

@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { pool } = require('../db');
-const { rota, texto, id, data, opcao, HttpError } = require('../http');
+const { rota, texto, id, opcao, cpf, telefone, email, nascimento, HttpError } = require('../http');
 
 const router = express.Router();
 
@@ -118,10 +118,10 @@ router.post('/', rota(async (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       texto(corpo.nome, 'nome', { max: 140 }),
-      texto(corpo.cpf, 'cpf', { obrigatorio: false, max: 14 }),
-      data(corpo.data_nascimento, 'data_nascimento'),
-      texto(corpo.telefone, 'telefone', { obrigatorio: false, max: 20 }),
-      texto(corpo.email, 'email', { obrigatorio: false, max: 160 }),
+      cpf(corpo.cpf),
+      nascimento(corpo.data_nascimento),
+      telefone(corpo.telefone),
+      email(corpo.email),
       texto(corpo.cidade, 'cidade', { obrigatorio: false, max: 120 }),
       corpo.servico_principal_id ? id(corpo.servico_principal_id, 'servico_principal_id') : null,
       opcao(corpo.status, 'status', STATUS, 'ativa'),
@@ -142,10 +142,10 @@ async function atualizarCliente(req, res) {
   const valores = [];
 
   if ('nome' in corpo) { campos.push('nome = ?'); valores.push(texto(corpo.nome, 'nome', { max: 140 })); }
-  if ('cpf' in corpo) { campos.push('cpf = ?'); valores.push(texto(corpo.cpf, 'cpf', { obrigatorio: false, max: 14 })); }
-  if ('data_nascimento' in corpo) { campos.push('data_nascimento = ?'); valores.push(data(corpo.data_nascimento, 'data_nascimento')); }
-  if ('telefone' in corpo) { campos.push('telefone = ?'); valores.push(texto(corpo.telefone, 'telefone', { obrigatorio: false, max: 20 })); }
-  if ('email' in corpo) { campos.push('email = ?'); valores.push(texto(corpo.email, 'email', { obrigatorio: false, max: 160 })); }
+  if ('cpf' in corpo) { campos.push('cpf = ?'); valores.push(cpf(corpo.cpf)); }
+  if ('data_nascimento' in corpo) { campos.push('data_nascimento = ?'); valores.push(nascimento(corpo.data_nascimento)); }
+  if ('telefone' in corpo) { campos.push('telefone = ?'); valores.push(telefone(corpo.telefone)); }
+  if ('email' in corpo) { campos.push('email = ?'); valores.push(email(corpo.email)); }
   if ('cidade' in corpo) { campos.push('cidade = ?'); valores.push(texto(corpo.cidade, 'cidade', { obrigatorio: false, max: 120 })); }
   if ('observacoes' in corpo) { campos.push('observacoes = ?'); valores.push(texto(corpo.observacoes, 'observacoes', { obrigatorio: false, max: 2000 })); }
   if ('servico_principal_id' in corpo) {

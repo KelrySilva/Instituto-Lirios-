@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { pool } = require('../db');
-const { rota, id, dataHora, inteiro, texto, opcao, HttpError } = require('../http');
+const { rota, id, dataHora, inteiro, texto, opcao, naoPassado, HttpError } = require('../http');
 
 const router = express.Router();
 
@@ -115,7 +115,10 @@ router.post('/', rota(async (req, res) => {
   }
 
   const statusNovo = opcao(corpo.status, 'status', STATUS, 'agendado');
-  if (statusNovo === 'agendado') await garantirHorarioLivre(inicio, duracao, 0);
+  if (statusNovo === 'agendado') {
+    naoPassado(inicio);
+    await garantirHorarioLivre(inicio, duracao, 0);
+  }
 
   const [resultado] = await pool.execute(
     `INSERT INTO agendamentos
@@ -150,6 +153,8 @@ router.put('/:id', rota(async (req, res) => {
   // Reagendar (ou reativar): não pode cair em cima de outra consulta marcada.
   if (novoStatus === 'agendado' &&
       ('inicio' in corpo || 'duracao_min' in corpo || atual.status !== 'agendado')) {
+    // Só confere o passado se a data/hora mudou: marcar como concluída uma consulta antiga continua permitido.
+    if ('inicio' in corpo && String(novoInicio).slice(0, 16) !== String(atual.inicio).slice(0, 16)) naoPassado(novoInicio);
     await garantirHorarioLivre(novoInicio, novaDuracao, idAgendamento);
   }
 

@@ -779,18 +779,21 @@ td.name{ font-weight:600; color:var(--brown-900); }
 
 /* Aviso flutuante (confirmações e validação) */
 .toast{
-  position:fixed; left:50%; bottom:26px; z-index:50;
-  transform:translate(-50%, 14px);
-  max-width:calc(100% - 40px);
+  /* acima de qualquer janela (os modais usam z-index 9999) e no topo, onde ninguém deixa de ver */
+  position:fixed; left:50%; top:22px; z-index:100000;
+  transform:translate(-50%, -14px);
+  max-width:min(560px, calc(100% - 40px));
   background:var(--brown-900); color:var(--white-soft);
-  font-size:13.5px; line-height:1.4;
-  padding:12px 20px; border-radius:12px;
-  box-shadow:0 10px 30px rgba(62,42,28,.25);
+  font-size:14.5px; line-height:1.45; font-weight:600;
+  padding:14px 22px; border-radius:12px;
+  box-shadow:0 12px 36px rgba(62,42,28,.35);
   opacity:0; pointer-events:none;
   transition:opacity .2s ease, transform .2s ease;
   text-align:center;
 }
 .toast.show{ opacity:1; transform:translate(-50%, 0); }
+/* mensagem de erro/validação: vermelha e com borda, impossível de confundir com um aviso de sucesso */
+.toast.toast-erro{ background:#8f2d2d; color:#fff; border:2px solid #f3c4c4; }
 
 @media (max-width: 600px){
   .cal-grid.is-week .cal-cell{ min-height:120px; }

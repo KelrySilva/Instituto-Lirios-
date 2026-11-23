@@ -11,6 +11,13 @@ db/
 └── validar.py      executa o modelo num espelho SQLite e confere tudo
 ```
 
+## Banco já criado antes? Atualize com `atualizar_banco.sql`
+
+Se o seu banco foi criado com uma versão antiga do `schema.sql`, faltam algumas tabelas
+(por exemplo `documentos`, para anexar arquivos, e `lembretes`). Abra `db/atualizar_banco.sql`
+no Workbench e clique no raio ⚡. Ele só cria o que falta e **não apaga dados**; pode rodar
+mais de uma vez. Depois, reinicie a API.
+
 ## Como criar o banco (MySQL Workbench)
 
 1. Abra o Workbench e conecte no seu servidor local.

@@ -481,6 +481,14 @@
       };
     },
 
+    /** A data/hora ('AAAA-MM-DD HH:MM') já passou? Compara até o minuto, no horário do computador. */
+    horarioJaPassou: function (dataHora) {
+      var d = new Date();
+      var p = function (n) { return String(n).padStart(2, '0'); };
+      var agora = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+      return String(dataHora).replace('T', ' ').slice(0, 16) < agora;
+    },
+
     /** O registro (contrato, atendimento, pendência...) pertence a esta cliente? Por id, não por nome. */
     mesmaCliente: registroDaCliente,
 
@@ -998,6 +1006,7 @@
     },
 
     criarAgendamento: async function (dados) {
+      if (Banco.horarioJaPassou(dados.inicio)) throw new Error('Não é possível agendar em data ou horário que já passou.');
       if (Banco.modo === 'api') {
         var bruto = await Banco.pedir('/agenda', {
           method: 'POST',
@@ -1046,6 +1055,9 @@
 
       var inicioNovo = dados.inicio || atual.inicio;
       var mudouHorario = String(inicioNovo).slice(0, 16) !== String(atual.inicio).slice(0, 16);
+      if (mudouHorario && Banco.horarioJaPassou(inicioNovo)) {
+        throw new Error('Não é possível reagendar para data ou horário que já passou.');
+      }
 
       if (Banco.modo === 'api') {
         var corpo = {};

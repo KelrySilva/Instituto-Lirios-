@@ -119,10 +119,14 @@
       el.setAttribute('aria-live', 'polite');
       document.body.appendChild(el);
     }
+    // Mensagens de erro ou de campo errado ficam vermelhas e duram mais, para dar tempo de ler.
+    var ehErro = /inv[aá]lid|n[aã]o [eé] poss|n[aã]o foi poss|n[aã]o pode|n[aã]o encontr|n[aã]o (est[aá]|existe)|j[aá] existe|j[aá] passou|informe|preencha|escolha|selecione|deve |obrigat|erro|falh|indispon|conflito|em uso|expirad|incorret/i
+      .test(String(mensagem));
     el.textContent = mensagem;
+    el.classList.toggle('toast-erro', ehErro);
     el.classList.add('show');
     window.clearTimeout(el._timer);
-    el._timer = window.setTimeout(function () { el.classList.remove('show'); }, 3400);
+    el._timer = window.setTimeout(function () { el.classList.remove('show'); }, ehErro ? 6500 : 3400);
   }
 
   function copiarTexto(texto) {
@@ -232,6 +236,75 @@
   }
 
   /** HTML de um campo de formulário do modal genérico. */
+  /* ----------------- campos de tamanho fixo (CPF, telefone, datas) ----------------- */
+
+  function soDigitos(valor) { return String(valor == null ? '' : valor).replace(/\D/g, ''); }
+
+  function formatarCpf(valor) {
+    var n = soDigitos(valor).slice(0, 11);
+    return n.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/^(\d{3})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3-$4');
+  }
+
+  function formatarTelefone(valor) {
+    var n = soDigitos(valor).slice(0, 11);
+    if (n.length <= 2) return n ? '(' + n : '';
+    if (n.length <= 6) return '(' + n.slice(0, 2) + ') ' + n.slice(2);
+    if (n.length <= 10) return '(' + n.slice(0, 2) + ') ' + n.slice(2, 6) + '-' + n.slice(6);
+    return '(' + n.slice(0, 2) + ') ' + n.slice(2, 7) + '-' + n.slice(7);
+  }
+
+  function cpfValido(valor) {
+    var n = soDigitos(valor);
+    if (n.length !== 11 || /^(\d)\1{10}$/.test(n)) return false;
+    for (var tam = 9; tam <= 10; tam++) {
+      var soma = 0;
+      for (var i = 0; i < tam; i++) soma += Number(n.charAt(i)) * (tam + 1 - i);
+      if (((soma * 10) % 11) % 10 !== Number(n.charAt(tam))) return false;
+    }
+    return true;
+  }
+
+  /** Confere CPF, telefone, e-mail e nascimento. Devolve a mensagem do 1º problema ou ''. */
+  function erroDosDadosDaCliente(d) {
+    if (d.cpf && !cpfValido(d.cpf)) return 'CPF inválido. Confira os 11 números.';
+    if (d.telefone) {
+      var t = soDigitos(d.telefone);
+      if (t.length !== 10 && t.length !== 11) return 'Telefone deve ter DDD + 8 ou 9 números, ex.: (99) 99999-9999.';
+      if (Number(t.slice(0, 2)) < 11) return 'O DDD do telefone é inválido.';
+      if (t.length === 11 && t.charAt(2) !== '9') return 'Celular de 9 dígitos começa com 9 depois do DDD.';
+    }
+    if (d.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(d.email).trim())) return 'O e-mail informado não é válido.';
+    var nasc = d.nascimento;
+    if (nasc && /^\d{4}-\d{2}-\d{2}$/.test(nasc)) {
+      if (nasc < '1900-01-01') return 'A data de nascimento não pode ser anterior a 1900.';
+      if (nasc > hojeISO()) return 'A data de nascimento não pode ser no futuro.';
+    }
+    return '';
+  }
+
+  /** Atributos de cada tipo de campo (limite de caracteres, máscara, faixa de data). */
+  function atributosDoCampo(chave) {
+    return {
+      nome: { maxlength: 140 },
+      cpf: { maxlength: 14, 'data-mascara': 'cpf', inputmode: 'numeric', placeholder: '000.000.000-00' },
+      telefone: { maxlength: 15, 'data-mascara': 'telefone', inputmode: 'tel', placeholder: '(99) 99999-9999' },
+      email: { maxlength: 160, placeholder: 'nome@email.com' },
+      cidade: { maxlength: 120 },
+      nascimento: { min: '1900-01-01', max: hojeISO() }
+    }[chave] || {};
+  }
+
+  /** Aplica a máscara enquanto a pessoa digita (CPF e telefone). */
+  function iniciarMascaras() {
+    document.addEventListener('input', function (evento) {
+      var alvo = evento.target;
+      var tipo = alvo && alvo.getAttribute && alvo.getAttribute('data-mascara');
+      if (tipo === 'cpf') alvo.value = formatarCpf(alvo.value);
+      else if (tipo === 'telefone') alvo.value = formatarTelefone(alvo.value);
+    });
+  }
+
   function campoHTML(campo) {
     var id = 'campo-' + campo.nome;
     var rotulo = '<label class="field-label" for="' + id + '">' + esc(campo.label) + '</label>';
@@ -248,10 +321,18 @@
         }).join('') + '</select>';
     } else if (campo.linha) {
       controle = '<textarea class="field-textarea" id="' + id + '" data-campo="' + campo.nome +
-        '" rows="' + campo.linha + '">' + esc(campo.valor || '') + '</textarea>';
+        '" rows="' + campo.linha + '" maxlength="255">' + esc(campo.valor || '') + '</textarea>';
     } else {
+      var extras = '';
+      var atributos = campo.attrs || {};
+      Object.keys(atributos).forEach(function (chave) {
+        extras += ' ' + chave + '="' + esc(atributos[chave]) + '"';
+      });
+      var valorCampo = campo.valor || '';
+      if (atributos['data-mascara'] === 'cpf') valorCampo = formatarCpf(valorCampo);
+      if (atributos['data-mascara'] === 'telefone') valorCampo = formatarTelefone(valorCampo);
       controle = '<input class="field-input" id="' + id + '" data-campo="' + campo.nome +
-        '" type="' + (campo.tipo || 'text') + '" value="' + esc(campo.valor || '') + '">';
+        '" type="' + (campo.tipo || 'text') + '" value="' + esc(valorCampo) + '"' + extras + '>';
     }
 
     return '<div class="field-group">' + rotulo + controle + '</div>';
@@ -272,6 +353,107 @@
     vazio.style.display = 'none';
     if (tabela) tabela.insertAdjacentElement('afterend', vazio);
     return vazio;
+  }
+
+  /**
+   * Na ficha e no atendimento o menu destaca "Clientes" (de onde a pessoa veio),
+   * e só destaca "Gestantes" quando ela chegou pela lista de gestantes.
+   */
+  function iniciarMenuDaFicha() {
+    var ehFicha = !!document.querySelector('.tab-panel[data-panel="dados"]') || /atendimento\.html/.test(window.location.pathname);
+    if (!ehFicha) return;
+    var veioDeGestantes = /gestantes\.html/.test(document.referrer || '');
+    var linkClientes = document.querySelector('.nav a[href="clientes.html"], nav a[href="clientes.html"]');
+    var linkGestantes = document.querySelector('nav a[href="gestantes.html"]');
+    if (linkClientes) linkClientes.classList.toggle('active', !veioDeGestantes);
+    if (linkGestantes) linkGestantes.classList.toggle('active', veioDeGestantes);
+  }
+
+  /* ----------------------------- Lista de gestantes ----------------------- */
+
+  function iniciarGestantes() {
+    var corpo = document.getElementById('gestanteTableBody');
+    if (!corpo) return;
+
+    var busca = document.getElementById('gestanteSearch');
+    var resumo = document.getElementById('gestantesResumo');
+    var vazio = estadoVazioDepoisDa(corpo.closest('table'), '');
+
+    function diasEntre(deISO, ateISO) {
+      return Math.round((fromISODate(ateISO) - fromISODate(deISO)) / 86400000);
+    }
+
+    function idadeGestacionalTexto(dum) {
+      if (!dum) return '—';
+      var dias = diasEntre(dum, hojeISO());
+      if (isNaN(dias) || dias < 0) return '—';
+      var semanas = Math.floor(dias / 7);
+      var resto = dias % 7;
+      return semanas + (semanas === 1 ? ' semana' : ' semanas') +
+        (resto ? ' e ' + resto + (resto === 1 ? ' dia' : ' dias') : '');
+    }
+
+    function partoPrevisto(dpp) {
+      if (!dpp) return '—';
+      var dias = diasEntre(hojeISO(), dpp);
+      if (isNaN(dias)) return '—';
+      var quando = dias > 1 ? 'em ' + dias + ' dias' : dias === 1 ? 'amanhã' : dias === 0 ? 'hoje'
+        : 'data já passou (' + Math.abs(dias) + (Math.abs(dias) === 1 ? ' dia' : ' dias') + ')';
+      return formatarBR(dpp) + ' · ' + quando;
+    }
+
+    // Gestante = tem gestação registrada OU faz acompanhamento de gestação (Pré-natal) como serviço principal.
+    function ehGestante(c) {
+      return c.status !== 'Inativa' && (!!c.gestacao || /pr[eé]-?\s?natal|gesta/i.test(String(c.servico || '')));
+    }
+
+    function gestantes() {
+      var termo = normalizar(busca ? busca.value : '');
+      return carregarClientes()
+        .filter(ehGestante)
+        .filter(function (c) { return !termo || normalizar(c.nome).indexOf(termo) !== -1; })
+        // quem está mais perto do parto aparece primeiro; sem data prevista vai para o fim, em ordem de nome
+        .sort(function (a, b) {
+          var da = String((a.gestacao && a.gestacao.dpp) || '9999');
+          var db = String((b.gestacao && b.gestacao.dpp) || '9999');
+          return da.localeCompare(db) || String(a.nome).localeCompare(String(b.nome));
+        });
+    }
+
+    function desenhar() {
+      var lista = gestantes();
+      var total = carregarClientes().filter(ehGestante).length;
+
+      corpo.innerHTML = '';
+      lista.forEach(function (cliente) {
+        var linha = document.createElement('tr');
+        linha.dataset.destino = urlFicha(cliente);
+        linha.dataset.clienteId = cliente.id;
+        var g = cliente.gestacao;
+        var semDados = '<span class="muted">Gestação não registrada</span>';
+        linha.innerHTML =
+          '<td class="name">' + esc(cliente.nome) + '</td>' +
+          '<td>' + esc(cliente.servico || '—') + '</td>' +
+          '<td>' + (g ? esc(idadeGestacionalTexto(g.dum)) : semDados) + '</td>' +
+          '<td>' + (g ? esc(partoPrevisto(g.dpp)) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + esc(cliente.telefone || '—') + '</td>';
+        linha.addEventListener('click', function () { irPara(linha.dataset.destino); });
+        corpo.appendChild(linha);
+      });
+
+      if (resumo) {
+        resumo.textContent = total === 0 ? 'Nenhuma gestante em acompanhamento no momento'
+          : total + (total === 1 ? ' gestante em acompanhamento' : ' gestantes em acompanhamento');
+      }
+
+      vazio.style.display = lista.length ? 'none' : '';
+      vazio.textContent = total === 0
+        ? 'Nenhuma gestante cadastrada. Aparecem aqui as clientes com gestação registrada ou com Pré-natal como serviço principal.'
+        : 'Nenhuma gestante encontrada com esse nome.';
+    }
+
+    if (busca) busca.addEventListener('input', desenhar);
+    desenhar();
   }
 
   /* --------------------------- 3. Data do dashboard ----------------------- */
@@ -564,10 +746,11 @@
       modalGenerico({
         titulo: atual ? 'Editar cliente' : 'Nova cliente',
         subtitulo: 'Dados básicos do cadastro',
-        html: campoHTML({ nome: 'nome', label: 'Nome completo', valor: dadosAtuais.nome }) +
-          campoHTML({ nome: 'nascimento', label: 'Data de nascimento', tipo: 'date', valor: dadosAtuais.nascimento }) +
-          campoHTML({ nome: 'telefone', label: 'Telefone', valor: dadosAtuais.telefone }) +
-          campoHTML({ nome: 'email', label: 'E-mail', tipo: 'email', valor: dadosAtuais.email }) +
+        html: campoHTML({ nome: 'nome', label: 'Nome completo', valor: dadosAtuais.nome, attrs: atributosDoCampo('nome') }) +
+          campoHTML({ nome: 'cpf', label: 'CPF', valor: dadosAtuais.cpf, attrs: atributosDoCampo('cpf') }) +
+          campoHTML({ nome: 'nascimento', label: 'Data de nascimento', tipo: 'date', valor: dadosAtuais.nascimento, attrs: atributosDoCampo('nascimento') }) +
+          campoHTML({ nome: 'telefone', label: 'Telefone', valor: dadosAtuais.telefone, attrs: atributosDoCampo('telefone') }) +
+          campoHTML({ nome: 'email', label: 'E-mail', tipo: 'email', valor: dadosAtuais.email, attrs: atributosDoCampo('email') }) +
           campoHTML({ nome: 'servico', label: 'Serviço principal', valor: dadosAtuais.servico, opcoes: nomesDeServico() }) +
           campoHTML({ nome: 'status', label: 'Status', valor: dadosAtuais.status, opcoes: ['Ativa', 'Pendente', 'Inativa'] }),
         acoes: [
@@ -578,10 +761,15 @@
               var dados = lerCampos(ctx.corpo);
               if (!dados.nome) { toast('Informe o nome da cliente.'); return; }
 
+              var problema = erroDosDadosDaCliente({ cpf: dados.cpf, telefone: dados.telefone, email: dados.email,
+                                                     nascimento: normalizarNascimento(dados.nascimento) });
+              if (problema) { toast(problema); return; }
+
               var registro = {
                 nome: dados.nome,
+                cpf: dados.cpf ? formatarCpf(dados.cpf) : '',
                 nascimento: normalizarNascimento(dados.nascimento),
-                telefone: dados.telefone,
+                telefone: dados.telefone ? formatarTelefone(dados.telefone) : '',
                 email: dados.email,
                 status: dados.status,
                 servico_principal_id: servicoIdPorNome(dados.servico)
@@ -1173,18 +1361,25 @@
       if (!painel) return;
 
       var lista = [];
+      var problemaLista = '';
       try {
         lista = await Banco.listarDocumentos(cliente.id);
       } catch (erro) {
-        painel.innerHTML = '<p class="muted" style="margin:0;">Não foi possível carregar os documentos.</p>';
-        return;
+        // O botão de anexar continua aparecendo; a tela mostra o motivo em vez de esconder tudo.
+        console.warn('[Lírios] documentos:', erro);
+        problemaLista = (erro && erro.message) ? erro.message : 'erro desconhecido';
       }
 
       painel.innerHTML =
         '<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">' +
+          '<span class="small muted" style="margin-right:auto;align-self:center;">Aceita PDF, imagens (PNG, JPG), Word e TXT, até 5 MB.</span>' +
           '<button type="button" class="btn btn-primary btn-sm" id="btnAdicionarDocumento">+ Adicionar documento</button>' +
           '<input type="file" id="arquivoDocumento" hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.doc,.docx">' +
         '</div>' +
+        (problemaLista
+          ? '<p class="small" style="margin:0 0 10px;color:#8f2d2d;">Não foi possível carregar a lista de documentos (' + esc(problemaLista) +
+            '). Se o banco foi criado antes desta função, rode o script <b>db/migracao_documentos.sql</b> no MySQL e reinicie a API.</p>'
+          : '') +
         (lista.length
           ? '<div class="agenda-list">' + lista.map(function (doc) {
               return '<div class="agenda-item">' +
@@ -1195,7 +1390,7 @@
                 '<button type="button" class="btn btn-ghost btn-sm" data-doc-excluir="' + doc.id + '">Excluir</button>' +
                 '</div>';
             }).join('') + '</div>'
-          : '<p class="muted" style="margin:0;">Nenhum documento anexado ainda.</p>');
+          : (problemaLista ? '' : '<p class="muted" style="margin:0;">Nenhum documento anexado ainda.</p>'));
 
       var entrada = document.getElementById('arquivoDocumento');
       document.getElementById('btnAdicionarDocumento').addEventListener('click', function () { entrada.click(); });
@@ -1386,6 +1581,7 @@
           campo.valor = cliente.nascimento || '';
           campo.tipo = 'date';
         }
+        campo.attrs = atributosDoCampo(CHAVES[indice]);
 
         return campo;
       });
@@ -1402,6 +1598,12 @@
               var valores = lerCampos(ctx.corpo);
               if (!valores['c0']) { toast('Informe o nome da cliente.'); return; }
 
+              var dadosParaConferir = {};
+              CHAVES.forEach(function (chave, indice) { dadosParaConferir[chave] = valores['c' + indice]; });
+              dadosParaConferir.nascimento = normalizarNascimento(dadosParaConferir.nascimento);
+              var problemaFicha = erroDosDadosDaCliente(dadosParaConferir);
+              if (problemaFicha) { toast(problemaFicha); return; }
+
               var mudancas = {};
               var servicoDigitado = null;
 
@@ -1409,6 +1611,8 @@
                 var valor = valores['c' + indice];
                 if (chave === 'nascimento') mudancas.nascimento = normalizarNascimento(valor);
                 else if (chave === 'servico') servicoDigitado = valor;
+                else if (chave === 'cpf') mudancas.cpf = valor ? formatarCpf(valor) : '';
+                else if (chave === 'telefone') mudancas.telefone = valor ? formatarTelefone(valor) : '';
                 else mudancas[chave] = valor || '';
               });
 
@@ -2200,7 +2404,7 @@
       modalGenerico({
         titulo: 'Reagendar consulta',
         subtitulo: evento.w,
-        html: campoHTML({ nome: 'data', label: 'Data', tipo: 'date', valor: iso }) +
+        html: campoHTML({ nome: 'data', label: 'Data', tipo: 'date', valor: iso, attrs: { min: hojeISO() } }) +
               campoHTML({ nome: 'hora', label: 'Horário', tipo: 'time', valor: evento.t }) +
               campoHTML({ nome: 'servico', label: 'Serviço', valor: evento.servico || servicos[0], opcoes: servicos }) +
               campoHTML({ nome: 'observacao', label: 'Observação', valor: evento.observacao || '', linha: 2 }),
@@ -2287,6 +2491,7 @@
 
     if (abrirAgendamento) abrirAgendamento.addEventListener('click', function () {
       var campoData = document.getElementById('dataAgendamento');
+      if (campoData) campoData.min = hojeISO(); // o calendário não deixa escolher dia que já passou
       if (campoData && !campoData.value) campoData.value = hojeISO();
       abrirOverlay(modalAgendamento);
       var primeiro = modalAgendamento.querySelector('select, input');
@@ -2310,6 +2515,11 @@
 
         if (!clienteId || !data || !hora || !servico) {
           toast('Preencha cliente, data, horário e serviço.');
+          return;
+        }
+
+        if (Banco.horarioJaPassou(data + ' ' + hora)) {
+          toast('Não é possível agendar em data ou horário que já passou.');
           return;
         }
 
@@ -2747,7 +2957,10 @@
     // 2) só então as telas são montadas, já com os dados em cache.
     iniciarDataAtual();
     iniciarOverlays();
+    iniciarMascaras();
     iniciarClientes();
+    iniciarGestantes();
+    iniciarMenuDaFicha();
     iniciarServicos();
     attachTabs('.tab-btn', '.tab-panel');
     iniciarCopiar();
